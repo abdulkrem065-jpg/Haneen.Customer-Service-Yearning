@@ -8,10 +8,11 @@ export interface GoogleSheetsConfig {
 export class ConfigValidator {
   static validate(config: Partial<GoogleSheetsConfig>): GoogleSheetsConfig {
     if (!config.spreadsheetId) {
-      if (process.env.GOOGLE_SHEETS_ID) {
-        config.spreadsheetId = process.env.GOOGLE_SHEETS_ID;
+      const idFromEnv = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEETS_ID;
+      if (idFromEnv) {
+        config.spreadsheetId = idFromEnv;
       } else {
-         throw new Error('Configuration Error: spreadsheetId is required.');
+        throw new Error('Configuration Error: spreadsheetId is required.');
       }
     }
     
