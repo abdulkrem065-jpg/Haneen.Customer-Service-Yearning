@@ -67,6 +67,10 @@ export async function verifyGoogleSheetsConnection(req: Request, res: Response) 
 
     const authHeader = req.headers.authorization;
     if (!authHeader || authHeader !== `Bearer ${adminSecret}`) {
+      // If browser request accepting HTML without valid auth, render secure UI form
+      if (req.headers.accept?.includes('text/html')) {
+        return renderVerifyUI(req, res);
+      }
       return res.status(401).json({ status: 'BLOCKED', message: 'Unauthorized. Invalid or missing Admin secret.' });
     }
 
@@ -139,4 +143,58 @@ export async function verifyGoogleSheetsConnection(req: Request, res: Response) 
       error: error.message
     });
   }
+}
+
+export function renderVerifyUI(req: Request, res: Response) {
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Google Sheets Live Verification</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; background: #f8fafc; color: #0f172a; padding: 2rem; max-width: 600px; margin: 0 auto; }
+    .card { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); border: 1px solid #e2e8f0; }
+    h1 { font-size: 1.25rem; margin-top: 0; color: #1e293b; }
+    p { font-size: 0.875rem; color: #64748b; line-height: 1.5; }
+    label { display: block; font-weight: 600; margin-bottom: 0.5rem; font-size: 0.875rem; color: #334155; }
+    input[type="password"] { width: 100%; padding: 0.625rem; border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; margin-bottom: 1rem; font-size: 1rem; }
+    button { background: #2563eb; color: white; border: none; padding: 0.625rem 1.25rem; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 0.875rem; width: 100%; }
+    button:hover { background: #1d4ed8; }
+    pre { background: #0f172a; color: #38bdf8; padding: 1rem; border-radius: 6px; overflow-x: auto; font-size: 0.875rem; display: none; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Google Sheets Live Verification UI</h1>
+    <p>Enter your Admin Verification Secret to run the read-only Google Sheets connectivity diagnostic directly on Render.</p>
+    <form id="verifyForm">
+      <label for="secret">Admin Verification Secret</label>
+      <input type="password" id="secret" required placeholder="Enter ADMIN_VERIFY_SECRET">
+      <button type="submit">Run Diagnostics</button>
+    </form>
+    <pre id="output"></pre>
+  </div>
+  <script>
+    document.getElementById('verifyForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const secret = document.getElementById('secret').value;
+      const output = document.getElementById('output');
+      output.style.display = 'block';
+      output.textContent = 'Executing live connection check...';
+      try {
+        const res = await fetch('/api/admin/verify-google-sheets', {
+          headers: { 'Authorization': 'Bearer ' + secret }
+        });
+        const data = await res.json();
+        output.textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        output.textContent = 'Error: ' + err.message;
+      }
+    });
+  </script>
+</body>
+</html>`;
+  res.setHeader('Content-Type', 'text/html');
+  res.send(html);
 }

@@ -119,6 +119,12 @@ async function startServer() {
     await verifyGoogleSheetsConnection(req, res);
   });
 
+  // UI interface for browser-based verification
+  app.get('/api/admin/verify-ui', async (req, res) => {
+    const { renderVerifyUI } = await import('./src/infrastructure/google-sheets/admin/verify-endpoint.js');
+    renderVerifyUI(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
