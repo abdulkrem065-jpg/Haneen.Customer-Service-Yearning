@@ -1,6 +1,7 @@
 import { GoogleAuth } from 'google-auth-library';
 import { GoogleSheetsConfig } from './config';
 import { ProviderError } from '../../core/data/errors';
+import { normalizePrivateKey, validatePrivateKey } from './key-utils';
 
 export interface IGoogleAuthClient {
   getClient(): Promise<any>;
@@ -13,11 +14,17 @@ export class GoogleServiceAccountAuth implements IGoogleAuthClient {
     if (!config.clientEmail || !config.privateKey) {
       throw new ProviderError('Missing credentials for GoogleServiceAccountAuth');
     }
+
+    const normalizedKey = normalizePrivateKey(config.privateKey);
+    const validation = validatePrivateKey(normalizedKey);
+    if (!validation.valid) {
+      throw new ProviderError('Invalid Google service account private key format');
+    }
     
     this.auth = new GoogleAuth({
       credentials: {
         client_email: config.clientEmail,
-        private_key: config.privateKey,
+        private_key: normalizedKey,
       },
       scopes: ['https://www.googleapis.com/auth/spreadsheets'],
     });
@@ -31,3 +38,4 @@ export class GoogleServiceAccountAuth implements IGoogleAuthClient {
     }
   }
 }
+

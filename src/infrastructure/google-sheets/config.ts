@@ -1,3 +1,5 @@
+import { normalizePrivateKey, validatePrivateKey } from './key-utils';
+
 export interface GoogleSheetsConfig {
   spreadsheetId: string;
   mockMode?: boolean;
@@ -16,20 +18,30 @@ export class ConfigValidator {
       }
     }
     
-    if (!config.mockMode && process.env.GOOGLE_SHEETS_MOCK_MODE !== 'true') {
+    const isMock = config.mockMode ?? process.env.GOOGLE_SHEETS_MOCK_MODE === 'true';
+
+    if (!isMock) {
       if (!config.clientEmail && !process.env.GOOGLE_SHEETS_CLIENT_EMAIL) {
          throw new Error('Configuration Error: clientEmail is required for real connection.');
       }
-      if (!config.privateKey && !process.env.GOOGLE_SHEETS_PRIVATE_KEY) {
+      const rawPrivateKey = config.privateKey || process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+      if (!rawPrivateKey) {
          throw new Error('Configuration Error: privateKey is required for real connection.');
+      }
+      const keyVal = validatePrivateKey(rawPrivateKey);
+      if (!keyVal.valid) {
+         throw new Error('Invalid Google service account private key format');
       }
     }
     
+    const rawKey = config.privateKey || process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+
     return {
       spreadsheetId: config.spreadsheetId,
-      mockMode: config.mockMode ?? process.env.GOOGLE_SHEETS_MOCK_MODE === 'true',
+      mockMode: isMock,
       clientEmail: config.clientEmail || process.env.GOOGLE_SHEETS_CLIENT_EMAIL,
-      privateKey: config.privateKey || process.env.GOOGLE_SHEETS_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+      privateKey: normalizePrivateKey(rawKey),
     };
   }
 }
+
