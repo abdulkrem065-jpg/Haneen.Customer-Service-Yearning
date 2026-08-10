@@ -113,6 +113,12 @@ async function startServer() {
     }
   });
 
+  // Secure endpoint to verify Render Google Sheets connection
+  app.get('/api/admin/verify-google-sheets', async (req, res) => {
+    const { verifyGoogleSheetsConnection } = await import('./src/infrastructure/google-sheets/admin/verify-endpoint.js');
+    await verifyGoogleSheetsConnection(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
