@@ -2,15 +2,23 @@ import { google } from 'googleapis';
 import { JWT } from 'google-auth-library';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import { normalizePrivateKey, validatePrivateKey } from './src/infrastructure/google-sheets/key-utils';
 
 dotenv.config();
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
 const CLIENT_EMAIL = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-const PRIVATE_KEY = process.env.GOOGLE_SHEETS_PRIVATE_KEY?.replace(/\\n/g, '\n');
+const RAW_PRIVATE_KEY = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
 
-if (!SPREADSHEET_ID || !CLIENT_EMAIL || !PRIVATE_KEY) {
+if (!SPREADSHEET_ID || !CLIENT_EMAIL || !RAW_PRIVATE_KEY) {
   console.error("Missing credentials. Make sure GOOGLE_SHEETS_SPREADSHEET_ID, GOOGLE_SHEETS_CLIENT_EMAIL, and GOOGLE_SHEETS_PRIVATE_KEY are set.");
+  process.exit(1);
+}
+
+const PRIVATE_KEY = normalizePrivateKey(RAW_PRIVATE_KEY);
+const validation = validatePrivateKey(PRIVATE_KEY);
+if (!validation.valid) {
+  console.error("Invalid private key format:", validation.reason);
   process.exit(1);
 }
 

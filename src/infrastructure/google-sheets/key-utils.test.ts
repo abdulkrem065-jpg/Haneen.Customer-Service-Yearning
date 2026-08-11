@@ -72,4 +72,11 @@ describe('CMD-019 Private Key Normalization and Validation', () => {
     expect(val3.valid).toBe(false);
     expect(val3.reason).toBe('Invalid Google service account private key format');
   });
+
+  it('7. handles escaped quotes and double-escaped newlines correctly', () => {
+    const pemEscapedQuotes = `\\"-----BEGIN PRIVATE KEY-----\\\\n${samplePEMBody}\\\\n-----END PRIVATE KEY-----\\"`;
+    const normalized = normalizePrivateKey(pemEscapedQuotes);
+    expect(normalized).toBe(`-----BEGIN PRIVATE KEY-----\n${samplePEMBody}\n-----END PRIVATE KEY-----`);
+    expect(validatePrivateKey(pemEscapedQuotes).valid).toBe(true);
+  });
 });

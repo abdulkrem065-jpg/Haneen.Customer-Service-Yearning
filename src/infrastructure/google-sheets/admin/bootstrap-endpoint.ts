@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { google } from 'googleapis';
 import { JWT } from 'google-auth-library';
 import crypto from 'crypto';
+import { normalizePrivateKey, validatePrivateKey } from '../key-utils';
 
 const FRESH_CANONICAL_SPREADSHEET_ID = '1b8x4Ub263-Yxbs8_ypjTWrV1_sgM9gLoE3gRx8U2mLo';
 
@@ -22,11 +23,17 @@ export async function bootstrapTenantEndpoint(req: Request, res: Response) {
     }
 
     const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
-    const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    const rawPrivateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
     const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
 
-    if (!clientEmail || !privateKey || !spreadsheetId) {
+    if (!clientEmail || !rawPrivateKey || !spreadsheetId) {
       return res.status(500).json({ status: 'BLOCKED', message: 'Missing Google credentials in environment.' });
+    }
+
+    const privateKey = normalizePrivateKey(rawPrivateKey);
+    const keyValidation = validatePrivateKey(privateKey);
+    if (!keyValidation.valid) {
+      return res.status(500).json({ status: 'BLOCKED', message: `Invalid Google private key format: ${keyValidation.reason || 'Unsupported format'}` });
     }
 
     if (spreadsheetId !== FRESH_CANONICAL_SPREADSHEET_ID) {

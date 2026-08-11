@@ -5,21 +5,37 @@ export function normalizePrivateKey(rawKey?: string): string {
 
   let key = rawKey.trim();
 
-  // Strip wrapping double or single quotes if present around the full value
-  if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
-    key = key.slice(1, -1).trim();
+  // Strip wrapping double or single quotes if present around the full value (repeatedly)
+  let prevKey = '';
+  while (key !== prevKey) {
+    prevKey = key;
+    if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+      key = key.slice(1, -1).trim();
+    }
+    if ((key.startsWith('\\"') && key.endsWith('\\"')) || (key.startsWith("\\'") && key.endsWith("\\'"))) {
+      key = key.slice(2, -2).trim();
+    }
   }
 
-  // Also strip escaped quotes like \"...\"
-  if ((key.startsWith('\\"') && key.endsWith('\\"')) || (key.startsWith("\\'") && key.endsWith("\\'"))) {
-    key = key.slice(2, -2).trim();
-  }
-
-  // Convert all escaped newline sequences (\r\n, \n, \\r\\n, \\n) and real CRLF (\r\n) to real newlines (\n)
+  // Convert all escaped newline sequences (\r\n, \n, \\r\\n, \\n, \\\\n) and real CRLF (\r\n) or CR (\r) to real newlines (\n)
   key = key
+    .replace(/\\\\n/g, '\n')
     .replace(/\\r\\n/g, '\n')
     .replace(/\\n/g, '\n')
-    .replace(/\r\n/g, '\n');
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+
+  // Strip wrapping quotes again if unescaping revealed outer quotes
+  prevKey = '';
+  while (key !== prevKey) {
+    prevKey = key;
+    if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+      key = key.slice(1, -1).trim();
+    }
+    if ((key.startsWith('\\"') && key.endsWith('\\"')) || (key.startsWith("\\'") && key.endsWith("\\'"))) {
+      key = key.slice(2, -2).trim();
+    }
+  }
 
   // Ensure newline after BEGIN PRIVATE KEY if missing
   if (key.includes('-----BEGIN PRIVATE KEY-----') && !key.includes('-----BEGIN PRIVATE KEY-----\n')) {
