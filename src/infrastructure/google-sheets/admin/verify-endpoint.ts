@@ -6,6 +6,10 @@ import { GoogleSheetsDataProvider } from '../provider';
 import { ISheetMapper, parseBoolean, formatBoolean } from '../mapper';
 import { HeaderMap } from '../header-map';
 import { Product } from '../../../core/data/domain';
+import { CanonicalProvisioner } from '../provisioner';
+import { CanonicalSchemas } from '../schema-definitions';
+
+const FRESH_CANONICAL_SPREADSHEET_ID = '1b8x4Ub263-Yxbs8_ypjTWrV1_sgM9gLoE3gRx8U2mLo';
 
 class TempProductMapper implements ISheetMapper<Product> {
   sheetName = 'products';
@@ -88,6 +92,18 @@ export async function verifyGoogleSheetsConnection(req: Request, res: Response) 
       return res.status(500).json({ status: 'BLOCKED', envStatus, message: 'Missing credentials in environment' });
     }
 
+    const isFreshCanonicalSpreadsheet = spreadsheetId === FRESH_CANONICAL_SPREADSHEET_ID;
+
+    if (!isFreshCanonicalSpreadsheet) {
+      return res.status(200).json({
+        status: 'BLOCKED',
+        envStatus,
+        spreadsheetIdCheck: 'MISMATCH_RENDER_UPDATE_REQUIRED',
+        expectedSpreadsheetId: FRESH_CANONICAL_SPREADSHEET_ID,
+        message: `GOOGLE_SHEETS_SPREADSHEET_ID in Render environment needs to be updated to the new fresh canonical Spreadsheet ID (${FRESH_CANONICAL_SPREADSHEET_ID}).`
+      });
+    }
+
     const config = ConfigValidator.validate({
       clientEmail,
       privateKey,
@@ -98,14 +114,45 @@ export async function verifyGoogleSheetsConnection(req: Request, res: Response) 
     const authClient = new GoogleServiceAccountAuth(config);
     const transport = new SecureGoogleSheetsTransport(authClient, config);
 
-    const metadata = await transport.getSpreadsheetMetadata();
-    const sheets = metadata.sheets?.map(s => s.properties?.title || '').filter(Boolean) || [];
-    
-    const canonicalSheets = [
-      'tenants', 'stores', 'products', 'categories', 'customers',
-      'orders', 'order_items', 'conversations', 'agent_config', 'store_settings'
-    ];
+    let metadata = await transport.getSpreadsheetMetadata();
+    let sheets = metadata.sheets?.map(s => s.properties?.title || '').filter(Boolean) || [];
 
+    // Analyze spreadsheet sheets using CanonicalProvisioner
+    const provisioner = new CanonicalProvisioner();
+    const sheetInfos = await Promise.all(
+      sheets.map(async (title) => {
+        const rows = await transport.getRows(title);
+        const headers = rows.length > 0 ? rows[0].values : [];
+        return { title, headers };
+      })
+    );
+
+    const plan = provisioner.analyzeSpreadsheet(sheetInfos);
+
+    if (plan.hasAmbiguity) {
+      return res.status(200).json({
+        status: 'BLOCKED',
+        envStatus,
+        ambiguityDetails: plan.ambiguityDetails,
+        message: 'Ambiguity detected during sheet provisioning analysis.'
+      });
+    }
+
+    // Execute structural provisioning for any missing canonical sheets
+    const newlyCreated: string[] = [];
+    for (const sheetItem of plan.sheetsToCreate) {
+      await transport.createSheet(sheetItem.name);
+      await transport.writeHeaderRow(sheetItem.name, sheetItem.headers);
+      newlyCreated.push(sheetItem.name);
+    }
+
+    // Re-fetch metadata after provisioning
+    if (newlyCreated.length > 0) {
+      metadata = await transport.getSpreadsheetMetadata();
+      sheets = metadata.sheets?.map(s => s.properties?.title || '').filter(Boolean) || [];
+    }
+
+    const canonicalSheets = Object.keys(CanonicalSchemas);
     const sheetStatus = canonicalSheets.map(s => ({
       name: s,
       status: sheets.includes(s) ? 'PRESENT' : 'MISSING'
@@ -130,8 +177,11 @@ export async function verifyGoogleSheetsConnection(req: Request, res: Response) 
     res.json({
       status: 'PASS',
       envStatus,
+      spreadsheetIdCheck: 'MATCHED_FRESH_CANONICAL',
+      spreadsheetId: FRESH_CANONICAL_SPREADSHEET_ID,
       authentication: 'PASS',
       metadataRead: 'PASS',
+      provisionedSheets: newlyCreated,
       canonicalSheets: sheetStatus,
       productProviderCheck: productCheck
     });

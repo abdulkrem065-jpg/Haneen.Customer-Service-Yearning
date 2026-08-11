@@ -75,6 +75,44 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
     throw new ProviderError('Zero-write policy is currently active. Real data writes are disabled.');
   }
 
+  async createSheet(sheetName: string): Promise<void> {
+    try {
+      const api = await this.getSheetsAPI();
+      await api.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              addSheet: {
+                properties: {
+                  title: sheetName,
+                },
+              },
+            },
+          ],
+        },
+      });
+    } catch (error: any) {
+      this.handleApiError(error);
+    }
+  }
+
+  async writeHeaderRow(sheetName: string, headers: string[]): Promise<void> {
+    try {
+      const api = await this.getSheetsAPI();
+      await api.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `'${sheetName}'!A1`,
+        valueInputOption: 'RAW',
+        requestBody: {
+          values: [headers],
+        },
+      });
+    } catch (error: any) {
+      this.handleApiError(error);
+    }
+  }
+
   private handleApiError(error: any): never {
     if (error.code === 404 || error.status === 404) {
       throw new ProviderError(`Spreadsheet not found or inaccessible.`);

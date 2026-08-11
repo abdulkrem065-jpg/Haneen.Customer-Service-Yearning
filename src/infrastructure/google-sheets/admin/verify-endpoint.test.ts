@@ -76,4 +76,26 @@ describe('CMD-019 Secure Verify Endpoint', () => {
     // Ensure actual values are NOT present in the response
     expect(JSON.stringify(jsonCall)).not.toContain('my-email@test.com');
   });
+
+  it('blocks request if GOOGLE_SHEETS_SPREADSHEET_ID does not match FRESH_CANONICAL_SPREADSHEET_ID', async () => {
+    process.env.ADMIN_VERIFY_SECRET = 'super-secret';
+    process.env.GOOGLE_SHEETS_CLIENT_EMAIL = 'my-email@test.com';
+    process.env.GOOGLE_SHEETS_PRIVATE_KEY = '-----BEGIN PRIVATE KEY-----\nfoo\n-----END PRIVATE KEY-----';
+    process.env.GOOGLE_SHEETS_SPREADSHEET_ID = 'old-legacy-spreadsheet-id';
+    
+    const req = { headers: { authorization: 'Bearer super-secret' } } as Request;
+    const res = {
+      status: vi.fn().mockReturnThis(),
+      json: vi.fn()
+    } as unknown as Response;
+
+    await verifyGoogleSheetsConnection(req, res);
+
+    expect(res.status).toHaveBeenCalledWith(200);
+    const jsonCall = (res.json as any).mock.calls[0][0];
+    
+    expect(jsonCall.status).toBe('BLOCKED');
+    expect(jsonCall.spreadsheetIdCheck).toBe('MISMATCH_RENDER_UPDATE_REQUIRED');
+    expect(jsonCall.message).toContain('GOOGLE_SHEETS_SPREADSHEET_ID in Render environment needs to be updated');
+  });
 });
