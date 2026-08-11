@@ -113,6 +113,18 @@ async function startServer() {
     }
   });
 
+  // Secure endpoint to execute CMD-023 Bootstrap
+  app.post('/api/admin/bootstrap-tenant', async (req, res) => {
+    const { bootstrapTenantEndpoint } = await import('./src/infrastructure/google-sheets/admin/bootstrap-endpoint.js');
+    await bootstrapTenantEndpoint(req, res);
+  });
+
+  // UI interface for browser-based bootstrap
+  app.get('/api/admin/bootstrap-ui', async (req, res) => {
+    const { renderBootstrapUI } = await import('./src/infrastructure/google-sheets/admin/bootstrap-endpoint.js');
+    renderBootstrapUI(req, res);
+  });
+
   // Secure endpoint to verify Render Google Sheets connection
   app.get('/api/admin/verify-google-sheets', async (req, res) => {
     const { verifyGoogleSheetsConnection } = await import('./src/infrastructure/google-sheets/admin/verify-endpoint.js');
