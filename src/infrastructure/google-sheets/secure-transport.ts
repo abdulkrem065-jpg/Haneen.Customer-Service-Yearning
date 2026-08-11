@@ -64,15 +64,75 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
   }
 
   async addRow(sheetName: string, values: string[]): Promise<SheetRow> {
-    throw new ProviderError('Zero-write policy is currently active. Real data writes are disabled.');
+    try {
+      const api = await this.getSheetsAPI();
+      const response = await api.spreadsheets.values.append({
+        spreadsheetId: this.spreadsheetId,
+        range: `'${sheetName}'!A:Z`,
+        valueInputOption: 'USER_ENTERED',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: {
+          values: [values],
+        },
+      });
+
+      const updatedRange = response.data.updates?.updatedRange || '';
+      const match = updatedRange.match(/!A(\d+):/);
+      const rowNumber = match ? parseInt(match[1], 10) : 0;
+
+      return { rowNumber, values };
+    } catch (error: any) {
+      this.handleApiError(error);
+      throw error;
+    }
   }
 
   async updateRow(sheetName: string, rowNumber: number, values: string[]): Promise<void> {
-    throw new ProviderError('Zero-write policy is currently active. Real data writes are disabled.');
+    try {
+      const api = await this.getSheetsAPI();
+      await api.spreadsheets.values.update({
+        spreadsheetId: this.spreadsheetId,
+        range: `'${sheetName}'!A${rowNumber}`,
+        valueInputOption: 'USER_ENTERED',
+        requestBody: {
+          values: [values],
+        },
+      });
+    } catch (error: any) {
+      this.handleApiError(error);
+    }
   }
 
   async deleteRow(sheetName: string, rowNumber: number): Promise<void> {
-    throw new ProviderError('Zero-write policy is currently active. Real data writes are disabled.');
+    try {
+      const api = await this.getSheetsAPI();
+      const metadata = await this.getSpreadsheetMetadata();
+      const sheet = metadata.sheets?.find((s: any) => s.properties?.title === sheetName);
+      if (!sheet || sheet.properties?.sheetId === undefined || sheet.properties?.sheetId === null) {
+        throw new ProviderError(`Sheet '${sheetName}' not found.`);
+      }
+      const sheetId = sheet.properties.sheetId;
+
+      await api.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              deleteDimension: {
+                range: {
+                  sheetId,
+                  dimension: 'ROWS',
+                  startIndex: rowNumber - 1,
+                  endIndex: rowNumber,
+                },
+              },
+            },
+          ],
+        },
+      });
+    } catch (error: any) {
+      this.handleApiError(error);
+    }
   }
 
   async createSheet(sheetName: string): Promise<void> {

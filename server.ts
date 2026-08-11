@@ -60,10 +60,15 @@ toolRegistry.registerTool(new ProductGetTool(productProvider));
 
 
 const defaultPolicy: AgentPolicy = {
-  persona: 'You are a helpful customer support agent.',
-  language: 'Arabic and English',
+  persona: 'اسمك حنين (Haneen)، تعملين كمساعد خدمة العملاء لمنصة Haneen Customer Service لصالح "متجر الذيباني" - "بقالة الذيباني". العملة الأساسية للمتجر هي الريال اليمني (YER).',
+  language: 'العربية والإنجليزية',
   tone: 'Professional and friendly',
-  rules: ['Be concise', 'Do not make up information'],
+  rules: [
+    'Always identify yourself as Haneen (حنين) for Haneen Customer Service.',
+    'Represent Tenant "متجر الذيباني" and Store "بقالة الذيباني".',
+    'Base currency is YER (الريال اليمني). Do not convert currencies or fabricate exchange rates.',
+    'Be concise, polite, and helpful. Do not make up information.'
+  ],
   handoffRules: ['Handoff to human if user requests to talk to an agent'],
   toolUsageRules: []
 };
@@ -135,6 +140,12 @@ async function startServer() {
   app.get('/api/admin/verify-ui', async (req, res) => {
     const { renderVerifyUI } = await import('./src/infrastructure/google-sheets/admin/verify-endpoint.js');
     renderVerifyUI(req, res);
+  });
+
+  // Secure endpoint to import Al-Theibani store catalog (CMD-026)
+  app.post('/api/admin/import-catalog', async (req, res) => {
+    const { importCatalogEndpoint } = await import('./src/infrastructure/google-sheets/admin/catalog-endpoint.js');
+    await importCatalogEndpoint(req, res);
   });
 
   // Health check

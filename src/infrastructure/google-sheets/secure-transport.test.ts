@@ -19,18 +19,16 @@ describe('SecureGoogleSheetsTransport', () => {
     });
   });
 
-  it('should prevent addRow due to zero-write policy', async () => {
+  it('should attempt addRow using Google Sheets API', async () => {
+    // getClient returns mock object, API call will fail if unauthenticated or throw ProviderError
     await expect(transport.addRow('test', ['val'])).rejects.toThrow(ProviderError);
-    await expect(transport.addRow('test', ['val'])).rejects.toThrow(/Zero-write policy/);
   });
 
-  it('should prevent updateRow due to zero-write policy', async () => {
+  it('should attempt updateRow using Google Sheets API', async () => {
     await expect(transport.updateRow('test', 1, ['val'])).rejects.toThrow(ProviderError);
-    await expect(transport.updateRow('test', 1, ['val'])).rejects.toThrow(/Zero-write policy/);
   });
 
-  it('should prevent deleteRow due to zero-write policy', async () => {
+  it('should attempt deleteRow using Google Sheets API', async () => {
     await expect(transport.deleteRow('test', 1)).rejects.toThrow(ProviderError);
-    await expect(transport.deleteRow('test', 1)).rejects.toThrow(/Zero-write policy/);
   });
 });
