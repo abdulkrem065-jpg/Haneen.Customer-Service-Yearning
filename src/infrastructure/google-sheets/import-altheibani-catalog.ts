@@ -19,8 +19,8 @@ export interface RawProductInput {
   available: boolean;
 }
 
-export const ALTHEIBANI_TENANT_ID = 'tenant-altheibani';
-export const ALTHEIBANI_STORE_ID = 'store-altheibani-grocery';
+export const ALTHEIBANI_TENANT_ID = 'tnt-41f0d530';
+export const ALTHEIBANI_STORE_ID = 'str-2c6ad81f';
 export const ALTHEIBANI_CURRENCY = 'YER';
 
 export const RAW_CATEGORIES: RawCategoryInput[] = [

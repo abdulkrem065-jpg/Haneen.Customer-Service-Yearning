@@ -148,6 +148,18 @@ async function startServer() {
     await importCatalogEndpoint(req, res);
   });
 
+  // Secure endpoint to provision real business knowledge (CMD-031)
+  app.post('/api/admin/provision-business-knowledge', async (req, res) => {
+    const { provisionBusinessKnowledgeEndpoint } = await import('./src/infrastructure/google-sheets/admin/business-knowledge-endpoint.js');
+    await provisionBusinessKnowledgeEndpoint(req, res);
+  });
+
+  // UI interface for browser-based business knowledge provisioning
+  app.get('/api/admin/provision-business-knowledge-ui', async (req, res) => {
+    const { renderProvisionBusinessKnowledgeUI } = await import('./src/infrastructure/google-sheets/admin/business-knowledge-endpoint.js');
+    renderProvisionBusinessKnowledgeUI(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
