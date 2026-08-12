@@ -43,7 +43,7 @@ describe('CMD-015: Gemini AI Provider Unit & Integration Tests', () => {
   it('1. Provider Initialization: Initializes correctly with mock mode and config', () => {
     const config = provider.getConfig();
     expect(config.isMockMode).toBe(true);
-    expect(config.model).toBe('gemini-2.5-flash');
+    expect(config.model).toBe('gemini-3.5-flash');
     expect(config.maxToolIterations).toBe(3);
   });
 
@@ -323,5 +323,23 @@ describe('CMD-015: Gemini AI Provider Unit & Integration Tests', () => {
 
     const result = await orchestrator.processMessage(createIncomingMessage('Hello Orchestrator'));
     expect(result.text).toBe('Orchestrated via GeminiAIProvider!');
+  });
+
+  it('17. Gemini Intelligence Task Routing: Correctly maps complex, general, and fast models', () => {
+    const complexProvider = GeminiAIProvider.createForTask('complex', { isMockMode: true });
+    const generalProvider = GeminiAIProvider.createForTask('general', { isMockMode: true });
+    const fastProvider = GeminiAIProvider.createForTask('fast', { isMockMode: true });
+
+    expect(complexProvider.getConfig().model).toBe('gemini-3.1-pro-preview');
+    expect(complexProvider.getConfig().enableThinking).toBe(true);
+    expect(complexProvider.getConfig().maxOutputTokens).toBeUndefined(); // Omitted for thinking mode
+
+    expect(generalProvider.getConfig().model).toBe('gemini-3.5-flash');
+    expect(generalProvider.getConfig().enableThinking).toBe(false);
+    expect(generalProvider.getConfig().maxOutputTokens).toBe(2048);
+
+    expect(fastProvider.getConfig().model).toBe('gemini-3.1-flash-lite');
+    expect(fastProvider.getConfig().enableThinking).toBe(false);
+    expect(fastProvider.getConfig().maxOutputTokens).toBe(2048);
   });
 });

@@ -1,7 +1,7 @@
 import { IAIProvider, AIProviderResponse, ITool, ToolExecutionResponse } from '../../../core/interfaces';
 import { IncomingMessage, OutgoingMessage, AgentPolicy } from '../../../core/types';
 import { IGeminiTransport } from './transport';
-import { GeminiConfig, GeminiConfigValidator } from './config';
+import { GeminiConfig, GeminiConfigValidator, GEMINI_MODELS } from './config';
 import { AIProviderError } from '../../../core/errors';
 import { RealGeminiTransport } from './gemini-transport';
 import { MockGeminiTransport } from './mock-transport';
@@ -27,6 +27,21 @@ export class GeminiAIProvider implements IAIProvider {
 
   public getConfig(): GeminiConfig {
     return { ...this.config };
+  }
+
+  public static createForTask(
+    taskType: 'complex' | 'general' | 'fast',
+    customConfig?: Partial<GeminiConfig>
+  ): GeminiAIProvider {
+    const model = taskType === 'complex' ? GEMINI_MODELS.COMPLEX :
+                  taskType === 'fast' ? GEMINI_MODELS.FAST :
+                  GEMINI_MODELS.GENERAL;
+
+    return new GeminiAIProvider({
+      ...customConfig,
+      model,
+      enableThinking: taskType === 'complex' ? true : customConfig?.enableThinking,
+    });
   }
 
   async generateResponse(

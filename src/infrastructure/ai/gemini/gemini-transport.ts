@@ -1,5 +1,5 @@
-import { GoogleGenAI } from '@google/genai';
-import { GeminiConfig } from './config';
+import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { GeminiConfig, GEMINI_MODELS } from './config';
 import { IGeminiTransport, GeminiTransportParams } from './transport';
 import { AIProviderResponse } from '../../../core/interfaces';
 import { AIProviderError } from '../../../core/errors';
@@ -43,15 +43,28 @@ export class RealGeminiTransport implements IGeminiTransport {
         }
       ] : undefined;
 
+      const isComplexModel = this.config.model === GEMINI_MODELS.COMPLEX;
+      const enableThinking = this.config.enableThinking ?? isComplexModel;
+
+      const requestConfig: Record<string, any> = {
+        systemInstruction,
+        temperature: this.config.temperature,
+        tools: toolsConfig,
+      };
+
+      if (enableThinking) {
+        requestConfig.thinkingConfig = {
+          thinkingLevel: ThinkingLevel.HIGH,
+        };
+        // Do not set maxOutputTokens when thinking is enabled
+      } else if (this.config.maxOutputTokens) {
+        requestConfig.maxOutputTokens = this.config.maxOutputTokens;
+      }
+
       const response = await this.ai.models.generateContent({
         model: this.config.model,
         contents: formattedContents,
-        config: {
-          systemInstruction,
-          temperature: this.config.temperature,
-          maxOutputTokens: this.config.maxOutputTokens,
-          tools: toolsConfig,
-        },
+        config: requestConfig,
       });
 
       const text = response.text || '';
