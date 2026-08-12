@@ -86,8 +86,56 @@ export const CanonicalSchemas: Record<string, ISchemaDefinition> = {
     sheetName: 'store_settings',
     scope: 'STORE',
     primaryKey: 'id',
-    requiredHeaders: ['id', 'tenantId', 'storeId', 'currency', 'language'],
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'baseCurrency', 'language'],
     optionalHeaders: ['timezone', 'contactInformation', 'policies'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  payment_methods: {
+    sheetName: 'payment_methods',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'methodType', 'displayName', 'isActive', 'displayOrder', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['accountDetails'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  business_hours: {
+    sheetName: 'business_hours',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'dayOfWeek', 'isClosed', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['openingTime', 'closingTime', 'notes'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  delivery_configuration: {
+    sheetName: 'delivery_configuration',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'isEnabled', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['deliveryAreas', 'deliveryFee', 'minimumOrder', 'estimatedDelivery', 'notes'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  store_contacts: {
+    sheetName: 'store_contacts',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'channelType', 'contactValue', 'isActive', 'displayOrder', 'createdAt', 'updatedAt'],
+    optionalHeaders: [],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  store_locations: {
+    sheetName: 'store_locations',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'address', 'isActive', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['mapUrl', 'coordinates'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  store_notices: {
+    sheetName: 'store_notices',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'title', 'content', 'isActive', 'displayOrder', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['imageUrl', 'validFrom', 'validUntil'],
     foreignKeys: ['tenantId', 'storeId']
   }
 };

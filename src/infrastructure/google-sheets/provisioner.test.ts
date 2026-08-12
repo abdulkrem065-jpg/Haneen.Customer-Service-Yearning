@@ -5,9 +5,9 @@ import { CanonicalSchemas } from './schema-definitions';
 describe('CMD-020 Canonical Google Sheets Provisioner', () => {
   const provisioner = new CanonicalProvisioner();
 
-  it('1. Generates 10 canonical sheets to create when spreadsheet is completely empty', () => {
+  it('1. Generates 16 canonical sheets to create when spreadsheet is completely empty', () => {
     const plan = provisioner.analyzeSpreadsheet([]);
-    expect(plan.sheetsToCreate.length).toBe(10);
+    expect(plan.sheetsToCreate.length).toBe(16);
     expect(plan.sheetsExisting.length).toBe(0);
     expect(plan.legacySheets.length).toBe(0);
     expect(plan.hasAmbiguity).toBe(false);
@@ -56,8 +56,8 @@ describe('CMD-020 Canonical Google Sheets Provisioner', () => {
     expect(plan.safetyGuarantees.zeroLegacyMigration).toBe(true);
     expect(plan.safetyGuarantees.zeroBusinessDataSeeding).toBe(true);
 
-    // Remaining 9 missing canonical sheets are queued for creation
-    expect(plan.sheetsToCreate.length).toBe(9);
+    // Remaining 15 missing canonical sheets are queued for creation
+    expect(plan.sheetsToCreate.length).toBe(15);
     const createdNames = plan.sheetsToCreate.map((s) => s.name);
     expect(createdNames).toContain('tenants');
     expect(createdNames).toContain('stores');
@@ -66,7 +66,7 @@ describe('CMD-020 Canonical Google Sheets Provisioner', () => {
     expect(createdNames).not.toContain('products'); // Does not recreate 'products' over legacy sheet
   });
 
-  it('3. Reports 10 existing canonical sheets when spreadsheet is fully provisioned', () => {
+  it('3. Reports 16 existing canonical sheets when spreadsheet is fully provisioned', () => {
     const existingSheets: ISheetInfo[] = Object.keys(CanonicalSchemas).map((key) => {
       const schema = CanonicalSchemas[key];
       return {
@@ -78,7 +78,7 @@ describe('CMD-020 Canonical Google Sheets Provisioner', () => {
     const plan = provisioner.analyzeSpreadsheet(existingSheets);
 
     expect(plan.sheetsToCreate.length).toBe(0);
-    expect(plan.sheetsExisting.length).toBe(10);
+    expect(plan.sheetsExisting.length).toBe(16);
     expect(plan.legacySheets.length).toBe(0);
     expect(plan.hasAmbiguity).toBe(false);
   });

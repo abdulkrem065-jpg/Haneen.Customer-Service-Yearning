@@ -1,5 +1,16 @@
 import { TenantContext } from '../types';
-import { Product, Customer, Order, ConversationData } from './domain';
+import { 
+  Product, 
+  Customer, 
+  Order, 
+  ConversationData,
+  PaymentMethod,
+  BusinessHour,
+  DeliveryConfiguration,
+  StoreContact,
+  StoreLocation,
+  StoreNotice
+} from './domain';
 
 // The DataOperationContext represents the trusted execution scope.
 export type DataOperationContext = TenantContext;
@@ -38,6 +49,13 @@ export interface IStoreDataFacade {
   customers: IDataProvider<Customer>;
   orders: IDataProvider<Order>;
   conversations: IDataProvider<ConversationData>;
+  
+  paymentMethods: IDataProvider<PaymentMethod>;
+  businessHours: IDataProvider<BusinessHour>;
+  deliveryConfig: IDataProvider<DeliveryConfiguration>;
+  storeContacts: IDataProvider<StoreContact>;
+  storeLocations: IDataProvider<StoreLocation>;
+  storeNotices: IDataProvider<StoreNotice>;
   
   // Custom Domain Operations
   checkProductAvailability(productId: string, quantity: number, context: DataOperationContext): Promise<boolean>;

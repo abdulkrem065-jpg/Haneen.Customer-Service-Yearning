@@ -18,7 +18,7 @@ export interface Store {
 }
 
 export interface StoreSettings {
-  currency: string;
+  baseCurrency: string;
   language: string;
   policies?: Record<string, string>;
 }
@@ -97,6 +97,85 @@ export interface ConversationData {
   agentId: string;
   status: 'ACTIVE' | 'CLOSED' | 'HUMAN_HANDOFF' | 'WAITING_FOR_HUMAN';
   channel: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PaymentMethod {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  methodType: string;
+  displayName: string;
+  accountDetails?: string;
+  isActive: boolean;
+  displayOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface BusinessHour {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  dayOfWeek: string;
+  openingTime?: string;
+  closingTime?: string;
+  isClosed: boolean;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DeliveryConfiguration {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  isEnabled: boolean;
+  deliveryAreas?: string;
+  deliveryFee?: number;
+  minimumOrder?: number;
+  estimatedDelivery?: string;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StoreContact {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  channelType: string;
+  contactValue: string;
+  isActive: boolean;
+  displayOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StoreLocation {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  address: string;
+  mapUrl?: string;
+  coordinates?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StoreNotice {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  title: string;
+  content: string;
+  imageUrl?: string;
+  isActive: boolean;
+  displayOrder: number;
+  validFrom?: Date;
+  validUntil?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
