@@ -114,14 +114,24 @@ export interface PaymentMethod {
   updatedAt: Date;
 }
 
+export interface BusinessHourShift {
+  openingTime: string;
+  closingTime: string;
+}
+
 export interface BusinessHour {
   id: string;
   tenantId: string;
   storeId: string;
   dayOfWeek: string;
+  isClosed: boolean;
+  is24Hours?: boolean;
+  shifts?: BusinessHourShift[] | string;
   openingTime?: string;
   closingTime?: string;
-  isClosed: boolean;
+  timezone?: string;
+  isActive?: boolean;
+  displayOrder?: number;
   notes?: string;
   createdAt: Date;
   updatedAt: Date;
@@ -134,9 +144,27 @@ export interface DeliveryConfiguration {
   isEnabled: boolean;
   deliveryAreas?: string;
   deliveryFee?: number;
+  currency?: string;
+  minimumOrderAmount?: number;
   minimumOrder?: number;
+  estimatedDeliveryMinutes?: number | string;
   estimatedDelivery?: string;
+  cashOnDeliveryEnabled?: boolean;
   notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DeliveryZone {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  name: string;
+  isActive: boolean;
+  deliveryFee?: number;
+  currency?: string;
+  estimatedDeliveryMinutes?: number | string;
+  displayOrder: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -157,10 +185,15 @@ export interface StoreLocation {
   id: string;
   tenantId: string;
   storeId: string;
+  name?: string;
   address: string;
+  googleMapsUrl?: string;
   mapUrl?: string;
+  latitude?: number | string;
+  longitude?: number | string;
   coordinates?: string;
   isActive: boolean;
+  displayOrder?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -176,6 +209,75 @@ export interface StoreNotice {
   displayOrder: number;
   validFrom?: Date;
   validUntil?: Date;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface StorePolicy {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  policyType: string;
+  title: string;
+  content: string;
+  isActive: boolean;
+  displayOrder: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface DigitalService {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  name: string;
+  description?: string;
+  serviceType: string;
+  isActive: boolean;
+  displayOrder: number;
+  metadata?: Record<string, unknown> | string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Lead {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  name: string;
+  phone: string;
+  email?: string;
+  businessType?: string;
+  requestedService?: string;
+  branchCount?: number;
+  currentSystem?: string;
+  customerNeed?: string;
+  status: 'NEW' | 'CONTACTED' | 'QUALIFIED' | 'CONVERTED' | 'CLOSED' | string;
+  source?: string;
+  notes?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface HumanHandoff {
+  id: string;
+  conversationId: string;
+  tenantId: string;
+  storeId: string;
+  reason: string;
+  summary: string;
+  status: 'PENDING' | 'ASSIGNED' | 'RESOLVED' | 'CANCELLED' | string;
+  createdAt: Date;
+  updatedAt?: Date;
+}
+
+export interface FeatureToggle {
+  id: string;
+  tenantId: string;
+  storeId: string;
+  key: string;
+  isEnabled: boolean;
+  metadata?: Record<string, unknown> | string;
   createdAt: Date;
   updatedAt: Date;
 }

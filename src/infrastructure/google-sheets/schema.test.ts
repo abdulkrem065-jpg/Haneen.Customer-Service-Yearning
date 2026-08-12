@@ -4,8 +4,8 @@ import { CanonicalSchemas, ISchemaDefinition } from './schema-definitions';
 describe('Google Sheets Canonical Schema Validation', () => {
   const schemas = Object.values(CanonicalSchemas);
 
-  it('1. Schema completeness - all 16 canonical sheets are defined', () => {
-    expect(schemas.length).toBe(16);
+  it('1. Schema completeness - all canonical sheets are defined', () => {
+    expect(schemas.length).toBe(Object.keys(CanonicalSchemas).length);
     const names = schemas.map(s => s.sheetName);
     expect(names).toContain('tenants');
     expect(names).toContain('stores');

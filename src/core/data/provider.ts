@@ -7,9 +7,15 @@ import {
   PaymentMethod,
   BusinessHour,
   DeliveryConfiguration,
+  DeliveryZone,
   StoreContact,
   StoreLocation,
-  StoreNotice
+  StoreNotice,
+  StorePolicy,
+  DigitalService,
+  Lead,
+  HumanHandoff,
+  FeatureToggle
 } from './domain';
 
 // The DataOperationContext represents the trusted execution scope.
@@ -53,9 +59,15 @@ export interface IStoreDataFacade {
   paymentMethods: IDataProvider<PaymentMethod>;
   businessHours: IDataProvider<BusinessHour>;
   deliveryConfig: IDataProvider<DeliveryConfiguration>;
+  deliveryZones?: IDataProvider<DeliveryZone>;
   storeContacts: IDataProvider<StoreContact>;
   storeLocations: IDataProvider<StoreLocation>;
   storeNotices: IDataProvider<StoreNotice>;
+  storePolicies?: IDataProvider<StorePolicy>;
+  digitalServices?: IDataProvider<DigitalService>;
+  leads?: IDataProvider<Lead>;
+  humanHandoffs?: IDataProvider<HumanHandoff>;
+  featureToggles?: IDataProvider<FeatureToggle>;
   
   // Custom Domain Operations
   checkProductAvailability(productId: string, quantity: number, context: DataOperationContext): Promise<boolean>;

@@ -103,7 +103,7 @@ export const CanonicalSchemas: Record<string, ISchemaDefinition> = {
     scope: 'STORE',
     primaryKey: 'id',
     requiredHeaders: ['id', 'tenantId', 'storeId', 'dayOfWeek', 'isClosed', 'createdAt', 'updatedAt'],
-    optionalHeaders: ['openingTime', 'closingTime', 'notes'],
+    optionalHeaders: ['is24Hours', 'shifts', 'openingTime', 'closingTime', 'timezone', 'isActive', 'displayOrder', 'notes'],
     foreignKeys: ['tenantId', 'storeId']
   },
   delivery_configuration: {
@@ -111,7 +111,15 @@ export const CanonicalSchemas: Record<string, ISchemaDefinition> = {
     scope: 'STORE',
     primaryKey: 'id',
     requiredHeaders: ['id', 'tenantId', 'storeId', 'isEnabled', 'createdAt', 'updatedAt'],
-    optionalHeaders: ['deliveryAreas', 'deliveryFee', 'minimumOrder', 'estimatedDelivery', 'notes'],
+    optionalHeaders: ['deliveryAreas', 'deliveryFee', 'currency', 'minimumOrderAmount', 'minimumOrder', 'estimatedDeliveryMinutes', 'estimatedDelivery', 'cashOnDeliveryEnabled', 'notes'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  delivery_zones: {
+    sheetName: 'delivery_zones',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'name', 'isActive', 'displayOrder', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['deliveryFee', 'currency', 'estimatedDeliveryMinutes'],
     foreignKeys: ['tenantId', 'storeId']
   },
   store_contacts: {
@@ -127,7 +135,7 @@ export const CanonicalSchemas: Record<string, ISchemaDefinition> = {
     scope: 'STORE',
     primaryKey: 'id',
     requiredHeaders: ['id', 'tenantId', 'storeId', 'address', 'isActive', 'createdAt', 'updatedAt'],
-    optionalHeaders: ['mapUrl', 'coordinates'],
+    optionalHeaders: ['name', 'googleMapsUrl', 'mapUrl', 'latitude', 'longitude', 'coordinates', 'displayOrder'],
     foreignKeys: ['tenantId', 'storeId']
   },
   store_notices: {
@@ -136,6 +144,46 @@ export const CanonicalSchemas: Record<string, ISchemaDefinition> = {
     primaryKey: 'id',
     requiredHeaders: ['id', 'tenantId', 'storeId', 'title', 'content', 'isActive', 'displayOrder', 'createdAt', 'updatedAt'],
     optionalHeaders: ['imageUrl', 'validFrom', 'validUntil'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  store_policies: {
+    sheetName: 'store_policies',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'policyType', 'title', 'content', 'isActive', 'displayOrder', 'createdAt', 'updatedAt'],
+    optionalHeaders: [],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  digital_services: {
+    sheetName: 'digital_services',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'name', 'serviceType', 'isActive', 'displayOrder', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['description', 'metadata'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  leads: {
+    sheetName: 'leads',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'name', 'phone', 'status', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['email', 'businessType', 'requestedService', 'branchCount', 'currentSystem', 'customerNeed', 'source', 'notes'],
+    foreignKeys: ['tenantId', 'storeId']
+  },
+  human_handoffs: {
+    sheetName: 'human_handoffs',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'conversationId', 'tenantId', 'storeId', 'reason', 'summary', 'status', 'createdAt'],
+    optionalHeaders: ['updatedAt'],
+    foreignKeys: ['tenantId', 'storeId', 'conversationId']
+  },
+  feature_toggles: {
+    sheetName: 'feature_toggles',
+    scope: 'STORE',
+    primaryKey: 'id',
+    requiredHeaders: ['id', 'tenantId', 'storeId', 'key', 'isEnabled', 'createdAt', 'updatedAt'],
+    optionalHeaders: ['metadata'],
     foreignKeys: ['tenantId', 'storeId']
   }
 };

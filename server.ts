@@ -160,6 +160,18 @@ async function startServer() {
     renderProvisionBusinessKnowledgeUI(req, res);
   });
 
+  // Secure read-only endpoint to read back business knowledge (CMD-032)
+  app.get('/api/admin/readback-business-knowledge', async (req, res) => {
+    const { readbackBusinessKnowledgeEndpoint } = await import('./src/infrastructure/google-sheets/admin/business-knowledge-endpoint.js');
+    await readbackBusinessKnowledgeEndpoint(req, res);
+  });
+
+  // UI interface for browser-based business knowledge read-back
+  app.get('/api/admin/readback-business-knowledge-ui', async (req, res) => {
+    const { renderReadbackBusinessKnowledgeUI } = await import('./src/infrastructure/google-sheets/admin/business-knowledge-endpoint.js');
+    renderReadbackBusinessKnowledgeUI(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });

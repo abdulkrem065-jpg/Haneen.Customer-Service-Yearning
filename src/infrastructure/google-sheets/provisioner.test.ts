@@ -5,9 +5,10 @@ import { CanonicalSchemas } from './schema-definitions';
 describe('CMD-020 Canonical Google Sheets Provisioner', () => {
   const provisioner = new CanonicalProvisioner();
 
-  it('1. Generates 16 canonical sheets to create when spreadsheet is completely empty', () => {
+  it('1. Generates all canonical sheets to create when spreadsheet is completely empty', () => {
+    const totalCanonical = Object.keys(CanonicalSchemas).length;
     const plan = provisioner.analyzeSpreadsheet([]);
-    expect(plan.sheetsToCreate.length).toBe(16);
+    expect(plan.sheetsToCreate.length).toBe(totalCanonical);
     expect(plan.sheetsExisting.length).toBe(0);
     expect(plan.legacySheets.length).toBe(0);
     expect(plan.hasAmbiguity).toBe(false);
@@ -56,8 +57,8 @@ describe('CMD-020 Canonical Google Sheets Provisioner', () => {
     expect(plan.safetyGuarantees.zeroLegacyMigration).toBe(true);
     expect(plan.safetyGuarantees.zeroBusinessDataSeeding).toBe(true);
 
-    // Remaining 15 missing canonical sheets are queued for creation
-    expect(plan.sheetsToCreate.length).toBe(15);
+    // Remaining missing canonical sheets are queued for creation
+    expect(plan.sheetsToCreate.length).toBe(Object.keys(CanonicalSchemas).length - 1);
     const createdNames = plan.sheetsToCreate.map((s) => s.name);
     expect(createdNames).toContain('tenants');
     expect(createdNames).toContain('stores');
@@ -66,7 +67,7 @@ describe('CMD-020 Canonical Google Sheets Provisioner', () => {
     expect(createdNames).not.toContain('products'); // Does not recreate 'products' over legacy sheet
   });
 
-  it('3. Reports 16 existing canonical sheets when spreadsheet is fully provisioned', () => {
+  it('3. Reports existing canonical sheets when spreadsheet is fully provisioned', () => {
     const existingSheets: ISheetInfo[] = Object.keys(CanonicalSchemas).map((key) => {
       const schema = CanonicalSchemas[key];
       return {
@@ -78,7 +79,7 @@ describe('CMD-020 Canonical Google Sheets Provisioner', () => {
     const plan = provisioner.analyzeSpreadsheet(existingSheets);
 
     expect(plan.sheetsToCreate.length).toBe(0);
-    expect(plan.sheetsExisting.length).toBe(16);
+    expect(plan.sheetsExisting.length).toBe(Object.keys(CanonicalSchemas).length);
     expect(plan.legacySheets.length).toBe(0);
     expect(plan.hasAmbiguity).toBe(false);
   });
