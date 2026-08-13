@@ -174,6 +174,17 @@ async function startServer() {
     renderReadbackBusinessKnowledgeUI(req, res);
   });
 
+  // CMD-035 Live Owner Settings endpoints
+  app.get('/api/admin/owner-settings', async (req, res) => {
+    const { getOwnerSettingsEndpoint } = await import('./src/infrastructure/google-sheets/admin/owner-settings-endpoint.js');
+    await getOwnerSettingsEndpoint(req, res);
+  });
+
+  app.post('/api/admin/owner-settings/update', async (req, res) => {
+    const { updateOwnerSettingEndpoint } = await import('./src/infrastructure/google-sheets/admin/owner-settings-endpoint.js');
+    await updateOwnerSettingEndpoint(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
