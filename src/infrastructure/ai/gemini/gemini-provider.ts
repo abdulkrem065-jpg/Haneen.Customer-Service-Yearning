@@ -72,6 +72,11 @@ export class GeminiAIProvider implements IAIProvider {
       return response;
     } catch (error: unknown) {
       if (error instanceof AIProviderError) {
+        if (error.message.includes('Rate Limit Exceeded') || error.message.includes('Quota')) {
+          return {
+            text: 'أهلاً بك في متجر الذيباني! نظام الدعم الذكي يواجه حالياً ضغطاً كبيراً في عدد الطلبات. يرجى إعادة إرسال طلبك بعد لحظات، أو التواصل المباشر مع خدمة العملاء.',
+          };
+        }
         throw error;
       }
       if (error instanceof Error) {

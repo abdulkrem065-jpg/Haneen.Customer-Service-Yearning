@@ -107,6 +107,29 @@ export class BusinessHoursTool {
     return NoHallucinationGuard.evaluateData(result.items, { entityNameAr: 'ساعات العمل' });
   }
 
+  async getSpecificDaySchedule(
+    dayName: string,
+    context: DataOperationContext,
+    clientContext?: { tenantId?: string; storeId?: string }
+  ): Promise<GuardEvaluationResult<BusinessHour | null>> {
+    NoHallucinationGuard.validateTrustedContext(clientContext, context);
+
+    const result = await this.businessHoursProvider.search({}, context);
+    const normalizedTarget = this.normalizeDayName(dayName);
+    const dayHour = result.items.find((h) => this.normalizeDayName(h.dayOfWeek) === normalizedTarget);
+
+    if (!dayHour) {
+      return {
+        state: 'UNKNOWN',
+        data: null,
+        message: `ساعات العمل ليوم ${dayName} غير محددة في بيانات المتجر.`,
+        isConfirmed: false
+      };
+    }
+
+    return NoHallucinationGuard.evaluateData(dayHour, { entityNameAr: `ساعات عمل يوم ${dayName}` });
+  }
+
   async getStoreStatus(
     context: DataOperationContext,
     options?: { targetDate?: Date; timezone?: string; tenantId?: string; storeId?: string }

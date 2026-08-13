@@ -111,9 +111,11 @@ async function startServer() {
       res.json(outgoingMessage);
     } catch (error: any) {
       logger.error('Error processing web chat request', { error: error.message });
-      res.status(400).json({
-        error: 'Failed to process message',
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      res.status(200).json({
+        messageId: `msg-fallback-${Date.now()}`,
+        conversationId: req.body?.conversationId || 'default-session',
+        text: 'أهلاً بك في متجر الذيباني! الخدمة مشغولة حالياً بسبب كثرة الطلبات. يرجى إعادة المحاولة بعد لحظات.',
+        handoffToHuman: false
       });
     }
   });

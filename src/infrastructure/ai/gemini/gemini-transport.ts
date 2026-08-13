@@ -19,32 +19,44 @@ export class RealGeminiTransport implements IGeminiTransport {
       throw new AIProviderError('REAL GEMINI: NOT CONFIGURED');
     }
 
-    try {
-      const systemInstruction = GeminiAdapter.buildSystemInstruction(params.policy);
-      const contents = GeminiAdapter.formatHistoryAndMessage(
-        params.message,
-        params.history,
-        params.toolResults
-      );
+    const systemInstruction = GeminiAdapter.buildSystemInstruction(params.policy);
+    const contents = GeminiAdapter.formatHistoryAndMessage(
+      params.message,
+      params.history,
+      params.toolResults
+    );
 
-      const formattedContents = contents.map(c => ({
-        role: c.role,
-        parts: c.parts.map(p => {
-          if ('text' in p) return { text: p.text };
-          if ('functionCall' in p) return { functionCall: p.functionCall };
-          if ('functionResponse' in p) return { functionResponse: p.functionResponse };
-          return { text: '' };
-        }),
-      }));
+    const formattedContents = contents.map(c => ({
+      role: c.role,
+      parts: c.parts.map(p => {
+        if ('text' in p) return { text: p.text };
+        if ('functionCall' in p) return { functionCall: p.functionCall };
+        if ('functionResponse' in p) return { functionResponse: p.functionResponse };
+        return { text: '' };
+      }),
+    }));
 
-      const toolsConfig = params.tools.length > 0 ? [
-        {
-          functionDeclarations: GeminiAdapter.formatTools(params.tools),
-        }
-      ] : undefined;
+    const toolsConfig = params.tools.length > 0 ? [
+      {
+        functionDeclarations: GeminiAdapter.formatTools(params.tools),
+      }
+    ] : undefined;
 
-      const isComplexModel = this.config.model === GEMINI_MODELS.COMPLEX;
-      const enableThinking = this.config.enableThinking ?? isComplexModel;
+    // Deduplicated list of models to try in sequence upon rate limits
+    const modelsToTry: string[] = [this.config.model];
+    if (!modelsToTry.includes(GEMINI_MODELS.GENERAL)) {
+      modelsToTry.push(GEMINI_MODELS.GENERAL);
+    }
+    if (!modelsToTry.includes(GEMINI_MODELS.FAST)) {
+      modelsToTry.push(GEMINI_MODELS.FAST);
+    }
+
+    let lastError: Error | null = null;
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const currentModel = modelsToTry[i];
+      const isComplexModel = currentModel === GEMINI_MODELS.COMPLEX;
+      const enableThinking = isComplexModel && (this.config.enableThinking ?? true);
 
       const requestConfig: Record<string, any> = {
         systemInstruction,
@@ -59,44 +71,67 @@ export class RealGeminiTransport implements IGeminiTransport {
         // Do not set maxOutputTokens when thinking is enabled
       } else if (this.config.maxOutputTokens) {
         requestConfig.maxOutputTokens = this.config.maxOutputTokens;
+      } else {
+        requestConfig.maxOutputTokens = 2048;
       }
 
-      const response = await this.ai.models.generateContent({
-        model: this.config.model,
-        contents: formattedContents,
-        config: requestConfig,
-      });
+      try {
+        const response = await this.ai.models.generateContent({
+          model: currentModel,
+          contents: formattedContents,
+          config: requestConfig,
+        });
 
-      const text = response.text || '';
-      const toolCalls: { name: string; params: Record<string, unknown> }[] = [];
+        const text = response.text || '';
+        const toolCalls: { name: string; params: Record<string, unknown> }[] = [];
 
-      if (response.functionCalls && response.functionCalls.length > 0) {
-        for (const call of response.functionCalls) {
-          toolCalls.push({
-            name: call.name,
-            params: (call.args as Record<string, unknown>) || {},
-          });
+        if (response.functionCalls && response.functionCalls.length > 0) {
+          for (const call of response.functionCalls) {
+            toolCalls.push({
+              name: call.name,
+              params: (call.args as Record<string, unknown>) || {},
+            });
+          }
+        }
+
+        return {
+          text,
+          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+        };
+      } catch (error: unknown) {
+        if (error instanceof Error) {
+          lastError = error;
+          const isRateLimit = error.message.includes('429') ||
+                              error.message.includes('Quota') ||
+                              error.message.includes('RESOURCE_EXHAUSTED') ||
+                              error.message.includes('Rate Limit');
+
+          const isAuthError = error.message.includes('API key') ||
+                              error.message.includes('401') ||
+                              error.message.includes('403');
+
+          if (isAuthError) {
+            throw new AIProviderError('Gemini Authentication Error');
+          }
+
+          if (isRateLimit) {
+            // If there are more models to try, pause briefly and fall back to next model
+            if (i < modelsToTry.length - 1) {
+              await new Promise(res => setTimeout(res, 400 * (i + 1)));
+              continue;
+            }
+            throw new AIProviderError('Gemini Rate Limit Exceeded');
+          }
+
+          if (error.message.includes('TIMEOUT') || error.message.includes('DEADLINE')) {
+            throw new AIProviderError('Gemini Timeout');
+          }
+
+          throw new AIProviderError(`Gemini Provider Failure: ${error.message}`);
         }
       }
-
-      return {
-        text,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      };
-    } catch (error: unknown) {
-      if (error instanceof Error) {
-        if (error.message.includes('API key') || error.message.includes('401') || error.message.includes('403')) {
-          throw new AIProviderError('Gemini Authentication Error');
-        }
-        if (error.message.includes('429') || error.message.includes('Quota')) {
-          throw new AIProviderError('Gemini Rate Limit Exceeded');
-        }
-        if (error.message.includes('TIMEOUT') || error.message.includes('DEADLINE')) {
-          throw new AIProviderError('Gemini Timeout');
-        }
-        throw new AIProviderError(`Gemini Provider Failure: ${error.message}`);
-      }
-      throw new AIProviderError('Unknown Gemini Provider Error');
     }
+
+    throw new AIProviderError(lastError?.message ? `Gemini Provider Failure: ${lastError.message}` : 'Gemini Rate Limit Exceeded');
   }
 }
