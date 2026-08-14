@@ -20,7 +20,8 @@ import {
   Map,
   ShieldCheck,
   Edit2,
-  Check
+  Check,
+  Save
 } from 'lucide-react';
 
 interface SettingCategory {
@@ -32,7 +33,7 @@ interface SettingCategory {
 
 const CATEGORIES: SettingCategory[] = [
   { id: 'identity', nameAr: 'هوية المتجر', icon: Store, descriptionAr: 'اسم المتجر، الشعار والمستندات' },
-  { id: 'haneen', nameAr: 'إعدادات Haneen', icon: Bot, descriptionAr: 'الشخصية، النبرة وقواعد عدم الهلوسة' },
+  { id: 'haneen', nameAr: 'إعدادات المساعد الذكي', icon: Bot, descriptionAr: 'اسم الوكيل (سناء)، الشخصية والنبرة' },
   { id: 'currency', nameAr: 'العملة (YER)', icon: Coins, descriptionAr: 'العملة الأساسية (الريال اليمني - YER)' },
   { id: 'hours', nameAr: 'ساعات العمل', icon: Clock, descriptionAr: '24/7، الأيام، فترات العمل والتوقيت' },
   { id: 'delivery', nameAr: 'إعدادات التوصيل', icon: Truck, descriptionAr: 'تفعيل التوصيل، الحد الأدنى والرسوم' },
@@ -101,7 +102,7 @@ export interface StoreLocationItem {
   latitude?: number;
   longitude?: number;
   isActive: boolean;
-  displayOrder?: number;
+  displayOrder: number;
 }
 
 export interface StorePolicyItem {
@@ -117,7 +118,7 @@ export interface DigitalServiceItem {
   id: string;
   name: string;
   serviceType: string;
-  description?: string;
+  description: string;
   isActive: boolean;
   displayOrder: number;
 }
@@ -130,23 +131,33 @@ export interface StoreNoticeItem {
   displayOrder: number;
 }
 
-export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose }) => {
-  const [activeCategory, setActiveCategory] = useState<string>('hours');
+interface StoreSettingsAdminProps {
+  onClose?: () => void;
+}
+
+export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose }) => {
+  const [activeCategory, setActiveCategory] = useState('haneen');
+  const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [errorStatus, setErrorStatus] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // Authoritative Context (Read-Only UI display)
-  const trustedContext = {
+  const [agentIdentityData, setAgentIdentityData] = useState({
+    displayName: 'سناء',
+    role: 'المساعد الذكي لخدمة العملاء',
+    greeting: 'أهلاً بك! أنا سناء، مساعدتك الذكية لخدمة العملاء في متجر الذيباني. يسعدني إجابة جميع استفساراتك حول المنتجات والأسعار وطرق الدفع وساعات العمل والتوصيل والخدمات الرقمية. كيف يمكنني مساعدتك اليوم؟'
+  });
+
+  const [trustedContext] = useState({
     tenantId: 'tnt-41f0d530',
-    storeId: 'str-2c6ad81f',
     tenantName: 'متجر الذيباني',
-    storeName: 'بقالة الذيباني'
-  };
+    storeId: 'str-2c6ad81f',
+    storeName: 'بقالة الذيباني',
+    agentId: 'agt-c93183d5'
+  });
 
-  // Live Domain States
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodItem[]>([
-    { id: 'pm-001', methodType: 'bank', displayName: 'بنك الكريمي', accountDetails: '306493341', isActive: false, displayOrder: 1 },
+    { id: 'pm-001', methodType: 'bank_account', displayName: 'بنك الكريمي (حساب تجاري)', accountDetails: '3055981242', isActive: true, displayOrder: 1 },
+    { id: 'pm-002', methodType: 'money_transfer', displayName: 'النجم للصرافة والتحويلات', accountDetails: 'اسم المستلم: متجر الذيباني', isActive: true, displayOrder: 2 },
     { id: 'pm-003', methodType: 'wallet', displayName: 'وان كاش', accountDetails: '770493341', isActive: true, displayOrder: 2 },
     { id: 'pm-004', methodType: 'wallet', displayName: 'جيب', accountDetails: '774780112', isActive: true, displayOrder: 3 },
     { id: 'pm-005', methodType: 'wallet', displayName: 'جوالي', accountDetails: '770493341', isActive: true, displayOrder: 4 },
@@ -193,7 +204,7 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
   ]);
 
   const [digitalServices, setDigitalServices] = useState<DigitalServiceItem[]>([
-    { id: 'ds-001', name: 'إنشاء متاجر إلكترونية للشركات', serviceType: 'STORE_BUILDING', description: 'تصميم وبناء متاجر متكاملة مع ربط حنين لخدمة العملاء الذكية.', isActive: true, displayOrder: 1 }
+    { id: 'ds-001', name: 'إنشاء متاجر إلكترونية للشركات', serviceType: 'STORE_BUILDING', description: 'تصميم وبناء متاجر متكاملة مع ربط المساعد الذكي لخدمة العملاء.', isActive: true, displayOrder: 1 }
   ]);
 
   const [storeNotices, setStoreNotices] = useState<StoreNoticeItem[]>([
@@ -218,7 +229,20 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
           if (data.storeNotices && data.storeNotices.length > 0) setStoreNotices(data.storeNotices);
         }
       }
-    } catch (err) {
+
+      // Fetch Agent Identity
+      const identityRes = await fetch('/api/agent-identity');
+      if (identityRes.ok) {
+        const identity = await identityRes.json();
+        if (identity && identity.displayName) {
+          setAgentIdentityData({
+            displayName: identity.displayName,
+            role: identity.role || 'المساعد الذكي لخدمة العملاء',
+            greeting: identity.greeting || ''
+          });
+        }
+      }
+    } catch {
       console.warn('Could not fetch live settings, using local initial state.');
     } finally {
       setIsLoading(false);
@@ -228,6 +252,39 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
   useEffect(() => {
     fetchLiveSettings();
   }, []);
+
+  const handleSaveAgentIdentity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setSaveStatus(null);
+    setErrorStatus(null);
+
+    try {
+      const res = await fetch('/api/admin/agent-identity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          displayName: agentIdentityData.displayName,
+          role: agentIdentityData.role,
+          greeting: agentIdentityData.greeting,
+          tenantId: trustedContext.tenantId,
+          storeId: trustedContext.storeId,
+          agentId: trustedContext.agentId
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setSaveStatus(`تم تحديث اسم المساعد إلى (${data.identity.displayName}) بنجاح (agentId: ${data.identity.agentId} ثابت)`);
+      } else {
+        setErrorStatus(data.error || 'فشلت عملية تحديث إعدادات هوية المساعد.');
+      }
+    } catch (err: any) {
+      setErrorStatus(`خطأ في الاتصال: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleUpdateDomainItem = async (domain: string, id: string, payload: Record<string, any>) => {
     setIsLoading(true);
@@ -267,7 +324,7 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               لوحة التحكم والإعدادات التشغيلية لمالك المتجر
               <span className="text-xs bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-mono">
-                CMD-036 COMPLETE CONTROL
+                CMD-047 IDENTITY & HARDENING
               </span>
             </h2>
             <p className="text-xs text-slate-400">
@@ -319,14 +376,13 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
             <span>{errorStatus}</span>
           </div>
-          <span className="text-xs font-mono text-red-400/80">Security Constraint</span>
         </div>
       )}
 
-      {/* Main Content Layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar Categories */}
-        <aside className="w-64 bg-slate-950/60 border-l border-slate-800 flex flex-col shrink-0 overflow-y-auto p-3 space-y-1">
+      {/* Main Layout */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Categories Sidebar */}
+        <aside className="w-64 bg-slate-950 border-l border-slate-800 p-3 overflow-y-auto space-y-1 shrink-0">
           <p className="text-xs font-semibold text-slate-400 px-3 py-2 uppercase tracking-wider">أقسام التحكم للمالك</p>
           {CATEGORIES.map((cat) => {
             const Icon = cat.icon;
@@ -372,18 +428,70 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
             </section>
           )}
 
-          {/* Haneen Config */}
+          {/* Agent Identity & Config */}
           {activeCategory === 'haneen' && (
             <section className="space-y-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Bot className="w-5 h-5 text-emerald-400" />
-                إعدادات المساعد الذكي (حنين)
+                إعدادات هوية المساعد الذكي (Agent Identity Configuration)
               </h3>
-              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3 text-sm">
-                <p className="text-slate-300">اسم المساعد: <span className="font-bold text-emerald-400">حنين (Haneen)</span></p>
-                <p className="text-slate-300">النبرة: <span className="text-slate-200">مهذبة، محترفة، وودودة بلهجة يمنية راقية.</span></p>
-                <p className="text-xs text-slate-400">تعتمد حنين حصرياً على البيانات التشغيلية المؤكدة من أجهزة الأدوات (Tools Facade) بدون أي تخمين أو هلوسة.</p>
-              </div>
+              <form onSubmit={handleSaveAgentIdentity} className="bg-slate-950 border border-slate-800 p-5 rounded-xl space-y-4 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">الاسم الظاهر للمساعد (Display Name) *</label>
+                    <input
+                      type="text"
+                      required
+                      value={agentIdentityData.displayName}
+                      onChange={(e) => setAgentIdentityData({ ...agentIdentityData, displayName: e.target.value })}
+                      placeholder="سناء"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-400 block mb-1">معرّف المساعد الداخلي الثابت (agentId)</label>
+                    <input
+                      readOnly
+                      value={trustedContext.agentId}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-400 font-mono text-xs cursor-not-allowed"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">الدور الوظيفي (Role)</label>
+                  <input
+                    type="text"
+                    value={agentIdentityData.role}
+                    onChange={(e) => setAgentIdentityData({ ...agentIdentityData, role: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 block mb-1">رسالة الترحيب الأولى (Greeting Message)</label>
+                  <textarea
+                    rows={3}
+                    value={agentIdentityData.greeting}
+                    onChange={(e) => setAgentIdentityData({ ...agentIdentityData, greeting: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500 text-xs leading-relaxed"
+                  />
+                </div>
+
+                <div className="pt-2 flex items-center justify-between border-t border-slate-800">
+                  <p className="text-xs text-slate-400">
+                    تغيير اسم المساعد مقتصر على الواجهة والرسائل الظاهرة (Display Identity)، مع الحفاظ الصارم على معرّف `agentId` وعدم الكتابة في شيتات جوجل.
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shrink-0"
+                  >
+                    <Save className="w-4 h-4" />
+                    حفظ هوية المساعد
+                  </button>
+                </div>
+              </form>
             </section>
           )}
 
@@ -454,77 +562,47 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
             <section className="space-y-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <Truck className="w-5 h-5 text-emerald-400" />
-                إعدادات خدمة التوصيل (Delivery Config)
+                إعدادات التوصيل والشحن
               </h3>
 
-              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+                <div className="flex items-center justify-between pb-3 border-b border-slate-800">
                   <div>
-                    <span className="font-bold text-white text-base">تفعيل خدمة التوصيل العامة</span>
-                    <p className="text-xs text-slate-400">عند تعطيل الخدمة لن تعرض حنين التوصيل للعملاء</p>
+                    <span className="font-bold text-white">خدمة التوصيل للمنازل</span>
+                    <p className="text-xs text-slate-400 mt-0.5">تفعيل أو إيقاف استلام طلبات التوصيل</p>
                   </div>
                   <button
                     onClick={() => handleUpdateDomainItem('delivery_configuration', deliveryConfig.id, { isEnabled: !deliveryConfig.isEnabled })}
                     className={`px-4 py-2 rounded-lg text-xs font-bold border ${
-                      deliveryConfig.isEnabled ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
+                      deliveryConfig.isEnabled ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-900 text-slate-400 border-slate-800'
                     }`}
                   >
-                    {deliveryConfig.isEnabled ? 'توصيل مُفعّل' : 'توصيل معطّل'}
+                    {deliveryConfig.isEnabled ? 'مفعل' : 'معطل'}
                   </button>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="grid grid-cols-2 gap-4 text-xs">
                   <div>
-                    <label className="text-xs text-slate-400 block mb-1">الحد الأدنى للطلب (YER)</label>
+                    <label className="text-slate-400 block mb-1">رسوم التوصيل الثابتة (YER)</label>
                     <input
                       type="number"
-                      value={deliveryConfig.minimumOrderAmount || 0}
-                      onChange={(e) => setDeliveryConfig({ ...deliveryConfig, minimumOrderAmount: parseFloat(e.target.value) || 0 })}
-                      onBlur={() => handleUpdateDomainItem('delivery_configuration', deliveryConfig.id, { minimumOrderAmount: deliveryConfig.minimumOrderAmount })}
-                      className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-slate-200"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-slate-400 block mb-1">رسوم التوصيل العامة (YER)</label>
-                    <input
-                      type="number"
-                      value={deliveryConfig.deliveryFee || 0}
-                      onChange={(e) => setDeliveryConfig({ ...deliveryConfig, deliveryFee: parseFloat(e.target.value) || 0 })}
+                      value={deliveryConfig.deliveryFee || 1000}
+                      onChange={(e) => setDeliveryConfig({ ...deliveryConfig, deliveryFee: Number(e.target.value) })}
                       onBlur={() => handleUpdateDomainItem('delivery_configuration', deliveryConfig.id, { deliveryFee: deliveryConfig.deliveryFee })}
                       className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-slate-200"
                     />
                   </div>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Delivery Zones */}
-          {activeCategory === 'zones' && (
-            <section className="space-y-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Map className="w-5 h-5 text-emerald-400" />
-                مناطق التوصيل المستقلة (Delivery Zones)
-              </h3>
-
-              <div className="space-y-3">
-                {deliveryZones.map((dz) => (
-                  <div key={dz.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-white">{dz.name}</span>
-                      <p className="text-xs text-slate-400 mt-1">الرسوم: {dz.deliveryFee} YER | الزمن المتوقع: {dz.estimatedDeliveryMinutes || 'غير محدد'}</p>
-                    </div>
-
-                    <button
-                      onClick={() => handleUpdateDomainItem('delivery_zones', dz.id, { isActive: !dz.isActive })}
-                      className={`px-3 py-1.5 rounded text-xs font-bold border ${
-                        dz.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {dz.isActive ? 'منطقة نشطة' : 'معطلة'}
-                    </button>
+                  <div>
+                    <label className="text-slate-400 block mb-1">الحد الأدنى للطلب (YER)</label>
+                    <input
+                      type="number"
+                      value={deliveryConfig.minimumOrderAmount || 2000}
+                      onChange={(e) => setDeliveryConfig({ ...deliveryConfig, minimumOrderAmount: Number(e.target.value) })}
+                      onBlur={() => handleUpdateDomainItem('delivery_configuration', deliveryConfig.id, { minimumOrderAmount: deliveryConfig.minimumOrderAmount })}
+                      className="w-full bg-slate-900 border border-slate-800 rounded px-3 py-2 text-slate-200"
+                    />
                   </div>
-                ))}
+                </div>
               </div>
             </section>
           )}
@@ -534,7 +612,7 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
             <section className="space-y-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-emerald-400" />
-                وسائل وطرق الدفع المتاحة
+                طرق الحسابات والدفع المفعلة
               </h3>
 
               <div className="space-y-3">
@@ -542,16 +620,16 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
                   <div key={pm.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
                     <div>
                       <span className="font-bold text-white">{pm.displayName}</span>
-                      {pm.accountDetails && <p className="text-xs text-slate-400 mt-1">الحساب: {pm.accountDetails}</p>}
+                      {pm.accountDetails && <p className="text-xs text-slate-400 mt-1">{pm.accountDetails}</p>}
                     </div>
 
                     <button
                       onClick={() => handleUpdateDomainItem('payment_methods', pm.id, { isActive: !pm.isActive })}
                       className={`px-4 py-2 rounded-lg text-xs font-bold border ${
-                        pm.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
+                        pm.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-900 text-slate-400 border-slate-800'
                       }`}
                     >
-                      {pm.isActive ? 'نشط' : 'معطل'}
+                      {pm.isActive ? 'مفعل' : 'معطل'}
                     </button>
                   </div>
                 ))}
@@ -564,144 +642,24 @@ export const StoreSettingsAdmin: React.FC<{ onClose?: () => void }> = ({ onClose
             <section className="space-y-4">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <PhoneCall className="w-5 h-5 text-emerald-400" />
-                وسائل الاتصال وقنوات التواصل
+                قنوات الاتصال والتواصل
               </h3>
 
               <div className="space-y-3">
                 {storeContacts.map((sc) => (
                   <div key={sc.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
                     <div>
-                      <span className="font-bold text-white">{sc.channelType === 'whatsapp' ? 'الواتساب الرسمي' : 'الهاتف المباشر'}</span>
-                      <p className="text-xs text-slate-400 mt-1 dir-ltr text-right">{sc.contactValue}</p>
+                      <span className="font-bold text-white uppercase">{sc.channelType}</span>
+                      <p className="text-xs text-slate-400 mt-1">{sc.contactValue}</p>
                     </div>
 
                     <button
                       onClick={() => handleUpdateDomainItem('store_contacts', sc.id, { isActive: !sc.isActive })}
                       className={`px-4 py-2 rounded-lg text-xs font-bold border ${
-                        sc.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
+                        sc.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-900 text-slate-400 border-slate-800'
                       }`}
                     >
-                      {sc.isActive ? 'نشط' : 'معطل'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Store Locations */}
-          {activeCategory === 'location' && (
-            <section className="space-y-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <MapPin className="w-5 h-5 text-emerald-400" />
-                الموقع وفروع المتجر
-              </h3>
-
-              <div className="space-y-3">
-                {storeLocations.map((loc) => (
-                  <div key={loc.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-white">{loc.name || 'الفرع الرئيسي'}</span>
-                      <p className="text-xs text-slate-400 mt-1">{loc.address}</p>
-                      {loc.googleMapsUrl && <p className="text-xs text-emerald-400 mt-1 dir-ltr text-right">{loc.googleMapsUrl}</p>}
-                    </div>
-
-                    <button
-                      onClick={() => handleUpdateDomainItem('store_locations', loc.id, { isActive: !loc.isActive })}
-                      className={`px-3 py-1.5 rounded text-xs font-bold border ${
-                        loc.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {loc.isActive ? 'فرع نشط' : 'معطل'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Store Policies */}
-          {activeCategory === 'policies' && (
-            <section className="space-y-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <FileText className="w-5 h-5 text-emerald-400" />
-                سياسات وشروط المتجر
-              </h3>
-
-              <div className="space-y-3">
-                {storePolicies.map((pol) => (
-                  <div key={pol.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-white">{pol.title} ({pol.policyType})</span>
-                      <button
-                        onClick={() => handleUpdateDomainItem('store_policies', pol.id, { isActive: !pol.isActive })}
-                        className={`px-3 py-1 rounded text-xs font-bold border ${
-                          pol.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}
-                      >
-                        {pol.isActive ? 'سياسة مفعّلة' : 'معطلة'}
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-300 bg-slate-900 p-2 rounded border border-slate-850">{pol.content}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Digital Services */}
-          {activeCategory === 'digital' && (
-            <section className="space-y-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-emerald-400" />
-                الخدمات الرقمية والتجارية
-              </h3>
-
-              <div className="space-y-3">
-                {digitalServices.map((ds) => (
-                  <div key={ds.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-white">{ds.name}</span>
-                      {ds.description && <p className="text-xs text-slate-400 mt-1">{ds.description}</p>}
-                    </div>
-
-                    <button
-                      onClick={() => handleUpdateDomainItem('digital_services', ds.id, { isActive: !ds.isActive })}
-                      className={`px-3 py-1.5 rounded text-xs font-bold border ${
-                        ds.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {ds.isActive ? 'خدمة مفعّلة' : 'معطلة'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-
-          {/* Store Notices */}
-          {activeCategory === 'notices' && (
-            <section className="space-y-4">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                <Bell className="w-5 h-5 text-emerald-400" />
-                الإعلانات والتنبيهات المباشرة
-              </h3>
-
-              <div className="space-y-3">
-                {storeNotices.map((not) => (
-                  <div key={not.id} className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
-                    <div>
-                      <span className="font-bold text-white">{not.title}</span>
-                      <p className="text-xs text-slate-400 mt-1">{not.content}</p>
-                    </div>
-
-                    <button
-                      onClick={() => handleUpdateDomainItem('store_notices', not.id, { isActive: !not.isActive })}
-                      className={`px-3 py-1.5 rounded text-xs font-bold border ${
-                        not.isActive ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-slate-800 text-slate-400 border-slate-700'
-                      }`}
-                    >
-                      {not.isActive ? 'إعلان مفعّل' : 'معطل'}
+                      {sc.isActive ? 'مفعل' : 'معطل'}
                     </button>
                   </div>
                 ))}

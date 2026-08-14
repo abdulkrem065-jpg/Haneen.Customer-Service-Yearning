@@ -20,7 +20,8 @@ import { SimpleToolRegistry } from './src/core/mocks.js';
 import { GeminiAIProvider } from './src/infrastructure/ai/gemini/gemini-provider.js';
 import { RealGeminiTransport } from './src/infrastructure/ai/gemini/gemini-transport.js';
 import { AgentPolicy } from './src/core/types.js';
-import { HaneenService } from './src/core/productization/haneen-service.js';
+import { HaneenService, CANONICAL_TENANT_ID, CANONICAL_STORE_ID, CANONICAL_AGENT_ID } from './src/core/productization/haneen-service.js';
+import { AgentIdentityStore } from './src/core/productization/agent-identity.js';
 import { UnauthorizedDataAccessError } from './src/core/data/errors.js';
 
 const haneenService = new HaneenService();
@@ -50,7 +51,6 @@ productProvider.create({
   inStock: true
 } as any, { tenantId: 'tenant-1', storeId: 'store-1', agentId: 'agent-1' });
 
-
 productProvider.create({
   name: 'Secret Tenant 2 Product',
   description: 'Top secret product for tenant 2 only',
@@ -62,13 +62,14 @@ productProvider.create({
 toolRegistry.registerTool(new ProductSearchTool(productProvider));
 toolRegistry.registerTool(new ProductGetTool(productProvider));
 
+const initialIdentity = AgentIdentityStore.getInstance().getIdentity();
 
 const defaultPolicy: AgentPolicy = {
-  persona: 'اسمك حنين (Haneen)، تعملين كمساعد خدمة العملاء لمنصة Haneen Customer Service لصالح "متجر الذيباني" - "بقالة الذيباني". العملة الأساسية للمتجر هي الريال اليمني (YER).',
+  persona: `اسمك ${initialIdentity.displayName}، تعملين كمساعد خدمة العملاء لصالح "متجر الذيباني" - "بقالة الذيباني". العملة الأساسية للمتجر هي الريال اليمني (YER).`,
   language: 'العربية والإنجليزية',
   tone: 'Professional and friendly',
   rules: [
-    'Always identify yourself as Haneen (حنين) for Haneen Customer Service.',
+    `Always identify yourself as ${initialIdentity.displayName} for Customer Service.`,
     'Represent Tenant "متجر الذيباني" and Store "بقالة الذيباني".',
     'Base currency is YER (الريال اليمني). Do not convert currencies or fabricate exchange rates.',
     'Be concise, polite, and helpful. Do not make up information.'
@@ -98,6 +99,42 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  // GET Agent Identity Configuration
+  app.get('/api/agent-identity', (req, res) => {
+    const identity = AgentIdentityStore.getInstance().getIdentity();
+    res.status(200).json(identity);
+  });
+
+  // POST/PUT Update Agent Identity Configuration (Owner Settings)
+  app.post('/api/admin/agent-identity', (req, res) => {
+    try {
+      const { displayName, role, greeting, enabled, tenantId, storeId, agentId } = req.body || {};
+
+      if (tenantId && tenantId !== CANONICAL_TENANT_ID) {
+        return res.status(403).json({ error: 'Unauthorized tenantId context override' });
+      }
+      if (storeId && storeId !== CANONICAL_STORE_ID) {
+        return res.status(403).json({ error: 'Unauthorized storeId context override' });
+      }
+
+      const updated = AgentIdentityStore.getInstance().updateIdentity({
+        ...(displayName ? { displayName } : {}),
+        ...(role ? { role } : {}),
+        ...(greeting ? { greeting } : {}),
+        ...(typeof enabled === 'boolean' ? { enabled } : {})
+      });
+
+      res.status(200).json({
+        success: true,
+        identity: updated,
+        googleSheetsWritesExecuted: 0,
+        verdict: 'AGENT_IDENTITY_UPDATED'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to update agent identity' });
+    }
+  });
 
   // API route for Web Chat (Production Haneen Service)
   app.post('/api/chat', async (req, res) => {
@@ -138,11 +175,12 @@ async function startServer() {
         });
       }
 
+      const agentName = AgentIdentityStore.getInstance().getIdentity().displayName;
       logger.error('Error processing web chat request', { error: error.message });
       res.status(200).json({
         conversationId: req.body?.conversationId || req.body?.sessionId || `conv-${Date.now()}`,
-        message: 'أهلاً بك في متجر الذيباني! الخدمة مشغولة حالياً بسبب كثرة الطلبات. يرجى إعادة المحاولة بعد لحظات.',
-        text: 'أهلاً بك في متجر الذيباني! الخدمة مشغولة حالياً بسبب كثرة الطلبات. يرجى إعادة المحاولة بعد لحظات.',
+        message: `أهلاً بك في متجر الذيباني! أنا ${agentName}، الخدمة مشغولة حالياً بسبب كثرة الطلبات. يرجى إعادة المحاولة بعد لحظات.`,
+        text: `أهلاً بك في متجر الذيباني! أنا ${agentName}، الخدمة مشغولة حالياً بسبب كثرة الطلبات. يرجى إعادة المحاولة بعد لحظات.`,
         status: 'ACTIVE',
         timestamp: new Date()
       });

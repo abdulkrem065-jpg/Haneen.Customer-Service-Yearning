@@ -23,6 +23,8 @@ export class ChatRateLimiter {
   }
 
   public validateAndRateLimit(message: string, clientKey: string): ValidationResult {
+    this.cleanupExpiredRecords();
+
     // 1. Check for empty or whitespace message
     if (!message || message.trim().length === 0) {
       return {
@@ -59,6 +61,18 @@ export class ChatRateLimiter {
     }
 
     return { valid: true };
+  }
+
+  public cleanupExpiredRecords(): number {
+    const now = Date.now();
+    let cleaned = 0;
+    for (const [key, record] of this.requestCounts.entries()) {
+      if (now > record.resetTime) {
+        this.requestCounts.delete(key);
+        cleaned++;
+      }
+    }
+    return cleaned;
   }
 
   public reset(): void {

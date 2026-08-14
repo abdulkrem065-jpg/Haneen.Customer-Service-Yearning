@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, AlertCircle, Bot, User, Loader2, RotateCcw, Headphones, Sparkles, CheckCircle2, ShieldCheck, ArrowRight, Settings } from 'lucide-react';
+import { Send, AlertCircle, Bot, User, Loader2, RotateCcw, Headphones, Sparkles, CheckCircle2, ShieldCheck, Settings } from 'lucide-react';
 import { StoreSettingsAdmin } from './admin/StoreSettingsAdmin';
+import { AgentIdentityStore, AgentIdentityConfig, DEFAULT_AGENT_IDENTITY } from '../core/productization/agent-identity';
 
 interface ChatMessage {
   id: string;
@@ -10,6 +11,9 @@ interface ChatMessage {
 }
 
 export const ChatInterface: React.FC = () => {
+  const [agentIdentity, setAgentIdentity] = useState<AgentIdentityConfig>(() =>
+    AgentIdentityStore.getInstance().getIdentity()
+  );
   const [conversationId, setConversationId] = useState<string>(
     () => `conv-${Date.now()}-${Math.floor(Math.random() * 1000)}`
   );
@@ -21,9 +25,27 @@ export const ChatInterface: React.FC = () => {
   const [showAdmin, setShowAdmin] = useState(false);
   const [showLeadModal, setShowLeadModal] = useState(false);
   const [leadFormData, setLeadFormData] = useState({ name: '', phone: '', serviceType: 'استشارة رقمية', email: '' });
-  const [leadConfirmedSuccess, setLeadConfirmedSuccess] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const fetchIdentity = async () => {
+    try {
+      const res = await fetch('/api/agent-identity');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.displayName) {
+          setAgentIdentity(data);
+          AgentIdentityStore.getInstance().updateIdentity(data);
+        }
+      }
+    } catch {
+      // Fallback to local default identity
+    }
+  };
+
+  useEffect(() => {
+    fetchIdentity();
+  }, [showAdmin]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -33,19 +55,19 @@ export const ChatInterface: React.FC = () => {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  // Initial welcome message from Haneen
+  // Initial welcome message from Agent Identity
   useEffect(() => {
     if (messages.length === 0) {
       setMessages([
         {
           id: 'msg-welcome',
-          text: 'أهلاً بك! أنا حنين، مساعدتك الذكية لخدمة العملاء في متجر الذيباني. يسعدني إجابة جميع استفساراتك حول المنتجات والأسعار وطرق الدفع وساعات العمل والتوصيل والخدمات الرقمية. كيف يمكنني مساعدتك اليوم؟',
+          text: agentIdentity.greeting || `أهلاً بك! أنا ${agentIdentity.displayName}، مساعدتك الذكية لخدمة العملاء في متجر الذيباني. يسعدني إجابة جميع استفساراتك حول المنتجات والأسعار وطرق الدفع وساعات العمل والتوصيل والخدمات الرقمية. كيف يمكنني مساعدتك اليوم؟`,
           sender: 'AGENT',
           timestamp: new Date()
         }
       ]);
     }
-  }, []);
+  }, [agentIdentity]);
 
   const handleStartNewConversation = () => {
     const newId = `conv-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -55,7 +77,7 @@ export const ChatInterface: React.FC = () => {
     setMessages([
       {
         id: `msg-welcome-${Date.now()}`,
-        text: 'أهلاً بك في محادثة جديدة! أنا حنين جاهزة لمساعدتك في متجر الذيباني. تفضل بطرح استفسارك.',
+        text: `أهلاً بك في محادثة جديدة! أنا ${agentIdentity.displayName} جاهزة لمساعدتك في متجر الذيباني. تفضل بطرح استفسارك.`,
         sender: 'AGENT',
         timestamp: new Date()
       }
@@ -145,7 +167,6 @@ export const ChatInterface: React.FC = () => {
 
       const data = await response.json();
       setShowLeadModal(false);
-      setLeadConfirmedSuccess(true);
 
       const agentMsg: ChatMessage = {
         id: `msg-lead-conf-${Date.now()}`,
@@ -155,7 +176,7 @@ export const ChatInterface: React.FC = () => {
       };
 
       setMessages((prev) => [...prev, agentMsg]);
-    } catch (err: any) {
+    } catch {
       setError('فشل تأكيد التسجيل، يرجى المحاولة مرة أخرى.');
     } finally {
       setIsLoading(false);
@@ -181,7 +202,9 @@ export const ChatInterface: React.FC = () => {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-base sm:text-lg font-bold text-slate-100 leading-none">حنين — خدمة العملاء الذكية</h1>
+              <h1 className="text-base sm:text-lg font-bold text-slate-100 leading-none">
+                {agentIdentity.displayName} — خدمة العملاء الذكية
+              </h1>
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                 مباشر
@@ -275,7 +298,7 @@ export const ChatInterface: React.FC = () => {
                 </div>
                 <div className="bg-slate-850 border border-slate-800 rounded-2xl rounded-tl-none px-4 py-3 text-slate-400 flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
-                  <span className="text-xs">حنين تكتب الرد الآن...</span>
+                  <span className="text-xs">{agentIdentity.displayName} تكتب الرد الآن...</span>
                 </div>
               </div>
             )}
@@ -414,7 +437,7 @@ export const ChatInterface: React.FC = () => {
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="اكتب استفسارك هنا لـ حنين..."
+                placeholder={`اكتب استفسارك هنا لـ ${agentIdentity.displayName}...`}
                 disabled={isLoading}
                 className="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 focus:outline-none focus:border-emerald-500 text-sm text-slate-100 placeholder-slate-500 disabled:opacity-50"
                 dir="auto"

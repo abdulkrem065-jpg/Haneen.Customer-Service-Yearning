@@ -11,8 +11,17 @@ export interface DigitalServiceLead {
   createdAt: Date;
 }
 
+export interface LeadStoreOptions {
+  maxLeads?: number;
+}
+
 export class InMemoryLeadStore {
   private leads: Map<string, DigitalServiceLead> = new Map();
+  private maxLeads: number;
+
+  constructor(options?: LeadStoreOptions) {
+    this.maxLeads = options?.maxLeads ?? 1000;
+  }
 
   /**
    * Records a lead ONLY if userConfirmed is true.
@@ -25,6 +34,10 @@ export class InMemoryLeadStore {
 
     if (!lead.name || !lead.phone || !lead.serviceType) {
       throw new Error('Lead registration rejected: name, phone, and serviceType are required');
+    }
+
+    if (this.leads.size >= this.maxLeads) {
+      this.evictOldestLead();
     }
 
     const leadId = `lead-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -44,6 +57,23 @@ export class InMemoryLeadStore {
 
   public getAllLeads(): DigitalServiceLead[] {
     return Array.from(this.leads.values());
+  }
+
+  private evictOldestLead(): void {
+    let oldestId: string | null = null;
+    let oldestTime = Infinity;
+
+    for (const [id, lead] of this.leads.entries()) {
+      const time = new Date(lead.createdAt).getTime();
+      if (time < oldestTime) {
+        oldestTime = time;
+        oldestId = id;
+      }
+    }
+
+    if (oldestId) {
+      this.leads.delete(oldestId);
+    }
   }
 
   public clear(): void {

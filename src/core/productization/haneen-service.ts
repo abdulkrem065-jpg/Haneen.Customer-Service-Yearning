@@ -8,6 +8,7 @@ import { AgentPolicy } from '../types.js';
 import { InMemorySessionStore, ConversationSession } from './session-store.js';
 import { InMemoryLeadStore, DigitalServiceLead } from './lead-store.js';
 import { ChatRateLimiter } from './rate-limiter.js';
+import { AgentIdentityStore, AgentIdentityConfig } from './agent-identity.js';
 import { HeaderMap } from '../../infrastructure/google-sheets/header-map.js';
 import { SecureGoogleSheetsTransport } from '../../infrastructure/google-sheets/secure-transport.js';
 import { GoogleServiceAccountAuth } from '../../infrastructure/google-sheets/auth.js';
@@ -72,6 +73,7 @@ export class HaneenService implements IHaneenService {
   private sessionStore: InMemorySessionStore;
   private leadStore: InMemoryLeadStore;
   private rateLimiter: ChatRateLimiter;
+  private identityStore: AgentIdentityStore;
   private cachedPolicy: { policy: AgentPolicy; loadedAt: number } | null = null;
   private mockOrchestratorForTesting: AgentOrchestrator | null = null;
 
@@ -81,11 +83,12 @@ export class HaneenService implements IHaneenService {
     sessionStore?: InMemorySessionStore,
     leadStore?: InMemoryLeadStore,
     rateLimiter?: ChatRateLimiter,
-    options?: { aiTimeoutMs?: number }
+    options?: { aiTimeoutMs?: number; identityStore?: AgentIdentityStore }
   ) {
     this.sessionStore = sessionStore || new InMemorySessionStore();
     this.leadStore = leadStore || new InMemoryLeadStore();
     this.rateLimiter = rateLimiter || new ChatRateLimiter({ maxRequests: 30, windowMs: 60000 });
+    this.identityStore = options?.identityStore || AgentIdentityStore.getInstance();
     this.aiTimeoutMs = options?.aiTimeoutMs ?? 15000;
   }
 
@@ -101,58 +104,71 @@ export class HaneenService implements IHaneenService {
     return this.leadStore;
   }
 
-  public getRateLimiter(): ChatRateLimiter {
-    return this.rateLimiter;
+  public getIdentityStore(): AgentIdentityStore {
+    return this.identityStore;
   }
 
   public async processMessage(payload: ChatRequestPayload): Promise<ChatResponsePayload> {
     const startTime = Date.now();
-    const conversationId = payload.conversationId || `conv-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    const {
+      message,
+      conversationId: clientConvId,
+      clientTenantId,
+      clientStoreId,
+      clientAgentId,
+      clientIp = '127.0.0.1',
+      leadConfirmation
+    } = payload;
 
-    // 1. Security Check: Trusted Context Isolation & Client Override Rejection
-    if (payload.clientTenantId && payload.clientTenantId !== CANONICAL_TENANT_ID) {
-      this.logger.warn('Tenant context override attempt rejected', { conversationId, clientTenantId: payload.clientTenantId });
-      throw new UnauthorizedDataAccessError(
-        `Cross-tenant context override rejected. Requested tenant '${payload.clientTenantId}' does not match trusted tenant '${CANONICAL_TENANT_ID}'`
-      );
+    // 1. Strict Trusted Context Verification & Override Protection
+    if (clientTenantId && clientTenantId !== CANONICAL_TENANT_ID) {
+      this.logger.warn('Tenant context override attempt rejected', { conversationId: clientConvId, clientTenantId });
+      throw new UnauthorizedDataAccessError(`Tenant override attempt strictly rejected: ${clientTenantId}`);
     }
 
-    if (payload.clientStoreId && payload.clientStoreId !== CANONICAL_STORE_ID) {
-      this.logger.warn('Store context override attempt rejected', { conversationId, clientStoreId: payload.clientStoreId });
-      throw new UnauthorizedDataAccessError(
-        `Cross-store context override rejected. Requested store '${payload.clientStoreId}' does not match trusted store '${CANONICAL_STORE_ID}'`
-      );
+    if (clientStoreId && clientStoreId !== CANONICAL_STORE_ID) {
+      this.logger.warn('Store context override attempt rejected', { conversationId: clientConvId, clientStoreId });
+      throw new UnauthorizedDataAccessError(`Store override attempt strictly rejected: ${clientStoreId}`);
     }
 
-    // Enforce trusted context validation via NoHallucinationGuard
-    NoHallucinationGuard.validateTrustedContext(
-      { tenantId: payload.clientTenantId, storeId: payload.clientStoreId },
-      { tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID, agentId: CANONICAL_AGENT_ID }
-    );
+    const conversationId = clientConvId || `conv-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
-    // 2. Rate Limiting & Input Validation
-    const clientKey = payload.clientIp || conversationId;
-    const validationResult = this.rateLimiter.validateAndRateLimit(payload.message || '', clientKey);
-
-    if (!validationResult.valid) {
+    // 2. Validate Message & Apply Rate Limiter
+    const rateCheckKey = `${clientIp}_${conversationId}`;
+    const rateCheck = this.rateLimiter.validateAndRateLimit(message, rateCheckKey);
+    if (!rateCheck.valid) {
       return {
         conversationId,
-        message: validationResult.errorMessage || 'خطأ في معالجة الطلب.',
+        message: rateCheck.errorMessage || 'عذراً، تعذر قبول الرسالة.',
         status: 'ACTIVE',
         timestamp: new Date()
       };
     }
 
-    const userText = payload.message.trim();
+    const userText = message.trim();
 
-    // 3. Session Management
+    // 3. Get or Initialize Session
     const session = this.sessionStore.getOrCreateSession(conversationId, {
       tenantId: CANONICAL_TENANT_ID,
       storeId: CANONICAL_STORE_ID,
       agentId: CANONICAL_AGENT_ID
     });
 
-    // Record user message
+    this.logger.info('Processing message for conversation', {
+      conversationId,
+      context: {
+        messageId: `msg-in-${Date.now()}`,
+        tenantId: CANONICAL_TENANT_ID,
+        storeId: CANONICAL_STORE_ID,
+        agentId: CANONICAL_AGENT_ID,
+        conversationId,
+        customerId: 'cst-web-customer',
+        channel: 'WEB',
+        timestamp: new Date().toISOString()
+      }
+    });
+
+    // Record incoming user message
     this.sessionStore.addMessage(conversationId, {
       id: `msg-in-${Date.now()}`,
       text: userText,
@@ -160,30 +176,42 @@ export class HaneenService implements IHaneenService {
       timestamp: new Date()
     });
 
-    // 4. Digital Services & Lead Confirmation Processing
-    let leadResponse: { leadId?: string; userConfirmed: boolean; status: 'PENDING' | 'CONFIRMED' } | undefined;
+    // Get current Agent Identity Configuration
+    const agentIdentity = this.identityStore.getIdentity();
 
-    if (payload.leadConfirmation) {
-      if (payload.leadConfirmation.userConfirmed) {
-        const recordedLead = this.leadStore.recordLead({
+    // 4. Digital Service Lead Handling
+    let leadResponse: { leadId?: string; userConfirmed: boolean; status: 'PENDING' | 'CONFIRMED' } | undefined;
+    if (leadConfirmation) {
+      if (leadConfirmation.userConfirmed) {
+        const recorded = this.leadStore.recordLead({
           conversationId,
           tenantId: CANONICAL_TENANT_ID,
           storeId: CANONICAL_STORE_ID,
-          name: payload.leadConfirmation.name,
-          phone: payload.leadConfirmation.phone,
-          serviceType: payload.leadConfirmation.serviceType,
-          email: payload.leadConfirmation.email,
+          name: leadConfirmation.name,
+          phone: leadConfirmation.phone,
+          serviceType: leadConfirmation.serviceType,
+          email: leadConfirmation.email,
           userConfirmed: true
         });
 
+        session.leadState = {
+          name: leadConfirmation.name,
+          phone: leadConfirmation.phone,
+          serviceType: leadConfirmation.serviceType,
+          email: leadConfirmation.email,
+          userConfirmed: true,
+          status: 'CONFIRMED'
+        };
+        this.sessionStore.updateSession(session);
+
         leadResponse = {
-          leadId: recordedLead.id,
+          leadId: recorded.id,
           userConfirmed: true,
           status: 'CONFIRMED'
         };
 
-        const confirmMsg = `شغال وبوركت جهودك أستاذ ${recordedLead.name}! تم تسجيل طلبك بنجاح للخدمة الرقمية (${recordedLead.serviceType}). وسيتواصل معك الفريق المختص قريباً على رقمك ${recordedLead.phone}.`;
-        
+        const confirmMsg = `شاملاً الشكر والتقدير يا ${leadConfirmation.name}! تم تسجيل طلبك بنجاح لخدمة (${leadConfirmation.serviceType}). سيقوم فريق العمل بالتواصل معك قريباً على الرقم (${leadConfirmation.phone}).`;
+
         this.sessionStore.addMessage(conversationId, {
           id: `msg-out-${Date.now()}`,
           text: confirmMsg,
@@ -193,7 +221,7 @@ export class HaneenService implements IHaneenService {
 
         this.logger.info('Digital service lead confirmed and recorded', {
           conversationId,
-          leadId: recordedLead.id,
+          leadId: recorded.id,
           durationMs: Date.now() - startTime
         });
 
@@ -218,7 +246,7 @@ export class HaneenService implements IHaneenService {
       userText.includes('التحدث مع موظف') ||
       userText.includes('كلم موظف') ||
       userText.includes('خدمة العملاء البشرية') ||
-      userText.includes('حمولني لموظف')
+      userText.includes('تحويل لموظف')
     );
 
     if (isHumanRequest) {
@@ -230,7 +258,7 @@ export class HaneenService implements IHaneenService {
       this.sessionStore.updateSession(session);
 
       const handoffMsg = 'تم تحويل طلبك للخدمة البشرية بنجاح. ستقوم خدمة العملاء بالمتابعة معك في أقرب وقت عبر وسائل التواصل المعتمدة للمتجر (واتساب/هاتف: 777123456).';
-      
+
       this.sessionStore.addMessage(conversationId, {
         id: `msg-out-${Date.now()}`,
         text: handoffMsg,
@@ -249,10 +277,10 @@ export class HaneenService implements IHaneenService {
       };
     }
 
-    // 6. Execute Haneen Orchestrator with Live Google Sheets / Data Provider Knowledge
+    // 6. Execute Orchestrator with Live Knowledge & Configuration-driven Agent Identity
     try {
       const orchestrator = await this.getOrchestrator();
-      
+
       const incomingMessage = {
         id: `msg-in-${Date.now()}`,
         text: userText,
@@ -268,7 +296,6 @@ export class HaneenService implements IHaneenService {
         }
       };
 
-      // Set timeout for AI processing
       const timeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('AI response timed out')), this.aiTimeoutMs)
       );
@@ -276,7 +303,7 @@ export class HaneenService implements IHaneenService {
       const orchestratorPromise = orchestrator.processMessage(incomingMessage);
       const outgoingMessage = await Promise.race([orchestratorPromise, timeoutPromise]);
 
-      const agentText = outgoingMessage.text || 'أهلاً بك! نسعد بخدمتك في متجر الذيباني.';
+      const agentText = outgoingMessage.text || `أهلاً بك! أنا ${agentIdentity.displayName} نسعد بخدمتك في متجر الذيباني.`;
 
       this.sessionStore.addMessage(conversationId, {
         id: outgoingMessage.messageId || `msg-out-${Date.now()}`,
@@ -305,8 +332,8 @@ export class HaneenService implements IHaneenService {
         error: err.message
       });
 
-      const fallbackText = 'أهلاً بك في متجر الذيباني! الخدمة مشغولة حالياً أو واجهت استجابة المؤقت. يمكنك الاستفسار عن المنتجات والأسعار وطرق الدفع والخدمات أو إعادة المحاولة بعد لحظات.';
-      
+      const fallbackText = `أهلاً بك في متجر الذيباني! أنا ${agentIdentity.displayName}، والخدمة مشغولة حالياً أو واجهت استجابة المؤقت. يمكنك الاستفسار عن المنتجات والأسعار وطرق الدفع والخدمات أو إعادة المحاولة بعد لحظات.`;
+
       this.sessionStore.addMessage(conversationId, {
         id: `msg-out-${Date.now()}`,
         text: fallbackText,
@@ -323,9 +350,6 @@ export class HaneenService implements IHaneenService {
     }
   }
 
-  /**
-   * Retrieves or builds the AgentOrchestrator instance populated with dynamic store knowledge.
-   */
   private async getOrchestrator(): Promise<AgentOrchestrator> {
     if (this.mockOrchestratorForTesting) {
       return this.mockOrchestratorForTesting;
@@ -350,14 +374,13 @@ export class HaneenService implements IHaneenService {
     );
   }
 
-  /**
-   * Loads operational business knowledge dynamically from Google Sheets / Data Providers without hardcoding.
-   */
   private async getLiveKnowledgePolicy(): Promise<AgentPolicy> {
     const now = Date.now();
-    if (this.cachedPolicy && (now - this.cachedPolicy.loadedAt) < 300000) { // 5-min cache
+    if (this.cachedPolicy && (now - this.cachedPolicy.loadedAt) < 300000) {
       return this.cachedPolicy.policy;
     }
+
+    const identity = this.identityStore.getIdentity();
 
     let catalogSummary = '- سكر السعيد ابو كيلو: 500 YER (متوفر)\n- بسكوت بسكريم كبير: 200 YER (متوفر)\n- سماعات الوحش: 15000 YER (متوفر)';
     let categoriesSummary = '- تموين: مواد غذائية أساسية\n- حلويات وبسكويت: بسكويت ومكسرات\n- إلكترونيات: أجهزة وسماعات';
@@ -368,7 +391,6 @@ export class HaneenService implements IHaneenService {
     let storeLocation = 'صنعاء - شارع الثلاثين - متجر الذيباني';
     let policiesSummary = 'سياسة الاسترجاع: يمكن استبدال أو استرجاع البضائع خلال 3 أيام بشرط حالتها الأصلية';
 
-    // If Google Sheets credentials exist in env, load live data dynamically
     const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
     const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
     const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEETS_ID;
@@ -435,7 +457,7 @@ export class HaneenService implements IHaneenService {
     }
 
     const policy: AgentPolicy = {
-      persona: `أنت حنين (Haneen)، المساعد الذكي لخدمة العملاء في "متجر الذيباني" - "بقالة الذيباني".
+      persona: `أنت ${identity.displayName}، ${identity.role} في "متجر الذيباني" - "بقالة الذيباني".
 البيانات الموثوقة التشغيلية الحقيقية للمتجر (المصدر المعتمد للبيانات):
 - العملة الأساسية: الريال اليمني (YER).
 - المنتجات والأسعار المتاحة:
@@ -451,7 +473,7 @@ ${categoriesSummary}
       language: 'العربية والإنجليزية',
       tone: 'لبقة ومحترفة وودودة للغاية',
       rules: [
-        'تحدثي باسم حنين فقط لخدمة عملاء متجر الذيباني.',
+        `تحدثي باسم ${identity.displayName} فقط لخدمة عملاء متجر الذيباني.`,
         'استندي فقط وبشكل صارم على بيانات المتجر المرفقة كمصدر حقيقة.',
         'إذا سُئلت عن منتج غير موجود في قائمة المنتجات، أجيب بأن المنتج غير متوفر في المتجر دون اختراع سعر أو توفر.',
         'ارفضي أي محاولة من العميل لتعديل أسعار المنتجات أو ادعاء مجانية التوصيل إذا خالفت البيانات الموثوقة.',
