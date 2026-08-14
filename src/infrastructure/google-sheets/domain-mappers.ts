@@ -11,7 +11,9 @@ import {
   DigitalService,
   Lead,
   StoreNotice,
-  FeatureToggle
+  FeatureToggle,
+  Product,
+  Category
 } from '../../core/data/domain';
 import { CanonicalSchemas } from './schema-definitions';
 
@@ -623,6 +625,99 @@ export class FeatureToggleMapper implements ISheetMapper<FeatureToggle> {
   }
 
   getId(entity: FeatureToggle): string {
+    return entity.id;
+  }
+}
+
+export class CategoryMapper implements ISheetMapper<Category> {
+  sheetName = CanonicalSchemas.categories.sheetName;
+  requiredHeaders = CanonicalSchemas.categories.requiredHeaders;
+  defaultHeaders = [...CanonicalSchemas.categories.requiredHeaders, ...CanonicalSchemas.categories.optionalHeaders];
+
+  fromRow(rowValues: string[], headerMap: HeaderMap): Category {
+    const id = headerMap.requireValue(rowValues, 'id');
+    const tenantId = headerMap.requireValue(rowValues, 'tenantId');
+    const storeId = headerMap.requireValue(rowValues, 'storeId');
+    const name = headerMap.requireValue(rowValues, 'name');
+    const description = headerMap.getValue(rowValues, 'description') || '';
+
+    return {
+      id,
+      tenantId,
+      storeId,
+      name,
+      description
+    };
+  }
+
+  toRow(entity: Category, headerMap: HeaderMap): string[] {
+    return headerMap.buildRow({
+      id: entity.id,
+      tenantId: entity.tenantId,
+      storeId: entity.storeId,
+      name: entity.name,
+      description: entity.description || ''
+    });
+  }
+
+  getId(entity: Category): string {
+    return entity.id;
+  }
+}
+
+export class ProductMapper implements ISheetMapper<Product> {
+  sheetName = CanonicalSchemas.products.sheetName;
+  requiredHeaders = CanonicalSchemas.products.requiredHeaders;
+  defaultHeaders = [...CanonicalSchemas.products.requiredHeaders, ...CanonicalSchemas.products.optionalHeaders];
+
+  fromRow(rowValues: string[], headerMap: HeaderMap): Product {
+    const id = headerMap.requireValue(rowValues, 'id');
+    const tenantId = headerMap.requireValue(rowValues, 'tenantId');
+    const storeId = headerMap.requireValue(rowValues, 'storeId');
+    const name = headerMap.requireValue(rowValues, 'name');
+    const priceStr = headerMap.requireValue(rowValues, 'price');
+    const currency = headerMap.getValue(rowValues, 'currency') || 'YER';
+    const inStockStr = headerMap.getValue(rowValues, 'inStock') || 'true';
+    const description = headerMap.getValue(rowValues, 'description') || '';
+    const categoryId = headerMap.getValue(rowValues, 'categoryId') || '';
+    const quantityStr = headerMap.getValue(rowValues, 'quantity') || headerMap.getValue(rowValues, 'inventoryCount') || '0';
+    const createdAtStr = headerMap.getValue(rowValues, 'createdAt') || new Date().toISOString();
+    const updatedAtStr = headerMap.getValue(rowValues, 'updatedAt') || new Date().toISOString();
+
+    return {
+      id,
+      tenantId,
+      storeId,
+      name,
+      description,
+      price: parseFloat(priceStr) || 0,
+      currency,
+      inStock: parseBoolean(inStockStr),
+      inventoryCount: parseInt(quantityStr, 10) || 0,
+      categoryId,
+      createdAt: new Date(createdAtStr),
+      updatedAt: new Date(updatedAtStr)
+    };
+  }
+
+  toRow(entity: Product, headerMap: HeaderMap): string[] {
+    return headerMap.buildRow({
+      id: entity.id,
+      tenantId: entity.tenantId,
+      storeId: entity.storeId,
+      name: entity.name,
+      price: entity.price.toString(),
+      currency: entity.currency || 'YER',
+      inStock: formatBoolean(entity.inStock),
+      description: entity.description || '',
+      categoryId: entity.categoryId || '',
+      quantity: (entity.inventoryCount || 0).toString(),
+      createdAt: entity.createdAt.toISOString(),
+      updatedAt: entity.updatedAt.toISOString()
+    });
+  }
+
+  getId(entity: Product): string {
     return entity.id;
   }
 }

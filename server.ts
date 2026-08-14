@@ -197,6 +197,18 @@ async function startServer() {
     renderProductionReadinessUI(req, res);
   });
 
+  // CMD-044 Live Haneen Customer Service Verification Endpoint
+  app.get('/api/admin/live-haneen-verification', async (req, res) => {
+    const { liveHaneenVerificationEndpoint } = await import('./src/infrastructure/google-sheets/admin/live-haneen-verification-endpoint.js');
+    await liveHaneenVerificationEndpoint(req, res);
+  });
+
+  // CMD-044 Live Haneen Customer Service Verification UI Interface
+  app.get('/api/admin/live-haneen-verification-ui', async (req, res) => {
+    const { renderLiveHaneenVerificationUI } = await import('./src/infrastructure/google-sheets/admin/live-haneen-verification-endpoint.js');
+    renderLiveHaneenVerificationUI(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
