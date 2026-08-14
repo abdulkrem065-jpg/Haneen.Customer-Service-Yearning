@@ -191,6 +191,12 @@ async function startServer() {
     await productionReadinessEndpoint(req, res);
   });
 
+  // CMD-043 Production Readiness UI Interface
+  app.get('/api/admin/production-readiness-ui', async (req, res) => {
+    const { renderProductionReadinessUI } = await import('./src/infrastructure/google-sheets/admin/production-readiness-endpoint.js');
+    renderProductionReadinessUI(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
