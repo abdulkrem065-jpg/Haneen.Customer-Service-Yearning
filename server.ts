@@ -185,6 +185,12 @@ async function startServer() {
     await updateOwnerSettingEndpoint(req, res);
   });
 
+  // CMD-041 Production Readiness Endpoint
+  app.get('/api/admin/production-readiness', async (req, res) => {
+    const { productionReadinessEndpoint } = await import('./src/infrastructure/google-sheets/admin/production-readiness-endpoint.js');
+    await productionReadinessEndpoint(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
