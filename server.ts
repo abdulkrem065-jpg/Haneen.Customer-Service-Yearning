@@ -20,6 +20,10 @@ import { SimpleToolRegistry } from './src/core/mocks.js';
 import { GeminiAIProvider } from './src/infrastructure/ai/gemini/gemini-provider.js';
 import { RealGeminiTransport } from './src/infrastructure/ai/gemini/gemini-transport.js';
 import { AgentPolicy } from './src/core/types.js';
+import { HaneenService } from './src/core/productization/haneen-service.js';
+import { UnauthorizedDataAccessError } from './src/core/data/errors.js';
+
+const haneenService = new HaneenService();
 
 // Setup Mock/Real Dependencies
 class ConsoleLogger {
@@ -95,27 +99,52 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API route for Web Chat
+  // API route for Web Chat (Production Haneen Service)
   app.post('/api/chat', async (req, res) => {
     try {
-      const payload = req.body as WebPayload;
-      // 1. Process via gateway
-      const incomingMessage = await gateway.processIncomingPayload('WEB', payload);
-      
-      // 2. Process via orchestrator
-      const outgoingMessage = await orchestrator.processMessage(incomingMessage);
-      
-      // 3. (Optional) Route back through gateway if needed, but for HTTP we can just return it.
-      await gateway.routeOutgoingMessage('WEB', outgoingMessage);
-      
-      res.json(outgoingMessage);
+      const body = req.body || {};
+      const userMessage = body.message || body.text || '';
+      const conversationId = body.conversationId || body.sessionId;
+      const clientTenantId = body.tenantId || body.clientTenantId;
+      const clientStoreId = body.storeId || body.clientStoreId;
+      const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+
+      const response = await haneenService.processMessage({
+        message: userMessage,
+        conversationId,
+        clientTenantId,
+        clientStoreId,
+        clientIp,
+        leadConfirmation: body.leadConfirmation
+      });
+
+      res.status(200).json({
+        conversationId: response.conversationId,
+        message: response.message,
+        text: response.message, // Backward compatibility
+        messageId: `msg-out-${Date.now()}`,
+        status: response.status,
+        handoffState: response.handoffState,
+        leadState: response.leadState,
+        timestamp: response.timestamp
+      });
     } catch (error: any) {
+      if (error instanceof UnauthorizedDataAccessError) {
+        logger.warn('Unauthorized context access rejected on /api/chat', { error: error.message });
+        return res.status(403).json({
+          error: error.message,
+          verdict: 'BLOCKED',
+          writesExecuted: 0
+        });
+      }
+
       logger.error('Error processing web chat request', { error: error.message });
       res.status(200).json({
-        messageId: `msg-fallback-${Date.now()}`,
-        conversationId: req.body?.conversationId || 'default-session',
+        conversationId: req.body?.conversationId || req.body?.sessionId || `conv-${Date.now()}`,
+        message: 'أهلاً بك في متجر الذيباني! الخدمة مشغولة حالياً بسبب كثرة الطلبات. يرجى إعادة المحاولة بعد لحظات.',
         text: 'أهلاً بك في متجر الذيباني! الخدمة مشغولة حالياً بسبب كثرة الطلبات. يرجى إعادة المحاولة بعد لحظات.',
-        handoffToHuman: false
+        status: 'ACTIVE',
+        timestamp: new Date()
       });
     }
   });

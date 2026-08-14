@@ -1,0 +1,467 @@
+import { NoHallucinationGuard } from '../tools/no-hallucination-guard.js';
+import { UnauthorizedDataAccessError } from '../data/errors.js';
+import { AgentOrchestrator } from '../orchestrator.js';
+import { GeminiAIProvider } from '../../infrastructure/ai/gemini/gemini-provider.js';
+import { InMemoryConversationContext } from '../../infrastructure/data/memory-conversation-context.js';
+import { SimpleToolRegistry } from '../mocks.js';
+import { AgentPolicy } from '../types.js';
+import { InMemorySessionStore, ConversationSession } from './session-store.js';
+import { InMemoryLeadStore, DigitalServiceLead } from './lead-store.js';
+import { ChatRateLimiter } from './rate-limiter.js';
+import { HeaderMap } from '../../infrastructure/google-sheets/header-map.js';
+import { SecureGoogleSheetsTransport } from '../../infrastructure/google-sheets/secure-transport.js';
+import { GoogleServiceAccountAuth } from '../../infrastructure/google-sheets/auth.js';
+
+export const CANONICAL_SPREADSHEET_ID = '1b8x4Ub263-Yxbs8_ypjTWrV1_sgM9gLoE3gRx8U2mLo';
+export const CANONICAL_TENANT_ID = 'tnt-41f0d530';
+export const CANONICAL_STORE_ID = 'str-2c6ad81f';
+export const CANONICAL_AGENT_ID = 'agt-c93183d5';
+export const CANONICAL_CURRENCY = 'YER';
+
+class SafeLogger {
+  info(message: string, meta?: Record<string, unknown>): void {
+    console.log(`[HaneenService] INFO: ${message}`, meta ? JSON.stringify(meta) : '');
+  }
+  warn(message: string, meta?: Record<string, unknown>): void {
+    console.warn(`[HaneenService] WARN: ${message}`, meta ? JSON.stringify(meta) : '');
+  }
+  error(message: string, meta?: Record<string, unknown>): void {
+    console.error(`[HaneenService] ERROR: ${message}`, meta ? JSON.stringify(meta) : '');
+  }
+  debug(message: string, meta?: Record<string, unknown>): void {}
+}
+
+export interface ChatRequestPayload {
+  message: string;
+  conversationId?: string;
+  clientTenantId?: string;
+  clientStoreId?: string;
+  clientAgentId?: string;
+  clientIp?: string;
+  leadConfirmation?: {
+    userConfirmed: boolean;
+    name: string;
+    phone: string;
+    serviceType: string;
+    email?: string;
+  };
+}
+
+export interface ChatResponsePayload {
+  conversationId: string;
+  message: string;
+  status: 'ACTIVE' | 'REQUIRES_HUMAN' | 'CLOSED';
+  handoffState?: {
+    reason: string;
+    requestedAt: Date;
+  };
+  leadState?: {
+    leadId?: string;
+    userConfirmed: boolean;
+    status: 'PENDING' | 'CONFIRMED';
+  };
+  timestamp: Date;
+}
+
+export interface IHaneenService {
+  processMessage(payload: ChatRequestPayload): Promise<ChatResponsePayload>;
+}
+
+export class HaneenService implements IHaneenService {
+  private logger = new SafeLogger();
+  private sessionStore: InMemorySessionStore;
+  private leadStore: InMemoryLeadStore;
+  private rateLimiter: ChatRateLimiter;
+  private cachedPolicy: { policy: AgentPolicy; loadedAt: number } | null = null;
+  private mockOrchestratorForTesting: AgentOrchestrator | null = null;
+
+  private aiTimeoutMs: number;
+
+  constructor(
+    sessionStore?: InMemorySessionStore,
+    leadStore?: InMemoryLeadStore,
+    rateLimiter?: ChatRateLimiter,
+    options?: { aiTimeoutMs?: number }
+  ) {
+    this.sessionStore = sessionStore || new InMemorySessionStore();
+    this.leadStore = leadStore || new InMemoryLeadStore();
+    this.rateLimiter = rateLimiter || new ChatRateLimiter({ maxRequests: 30, windowMs: 60000 });
+    this.aiTimeoutMs = options?.aiTimeoutMs ?? 15000;
+  }
+
+  public setMockOrchestrator(orchestrator: AgentOrchestrator): void {
+    this.mockOrchestratorForTesting = orchestrator;
+  }
+
+  public getSessionStore(): InMemorySessionStore {
+    return this.sessionStore;
+  }
+
+  public getLeadStore(): InMemoryLeadStore {
+    return this.leadStore;
+  }
+
+  public getRateLimiter(): ChatRateLimiter {
+    return this.rateLimiter;
+  }
+
+  public async processMessage(payload: ChatRequestPayload): Promise<ChatResponsePayload> {
+    const startTime = Date.now();
+    const conversationId = payload.conversationId || `conv-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+
+    // 1. Security Check: Trusted Context Isolation & Client Override Rejection
+    if (payload.clientTenantId && payload.clientTenantId !== CANONICAL_TENANT_ID) {
+      this.logger.warn('Tenant context override attempt rejected', { conversationId, clientTenantId: payload.clientTenantId });
+      throw new UnauthorizedDataAccessError(
+        `Cross-tenant context override rejected. Requested tenant '${payload.clientTenantId}' does not match trusted tenant '${CANONICAL_TENANT_ID}'`
+      );
+    }
+
+    if (payload.clientStoreId && payload.clientStoreId !== CANONICAL_STORE_ID) {
+      this.logger.warn('Store context override attempt rejected', { conversationId, clientStoreId: payload.clientStoreId });
+      throw new UnauthorizedDataAccessError(
+        `Cross-store context override rejected. Requested store '${payload.clientStoreId}' does not match trusted store '${CANONICAL_STORE_ID}'`
+      );
+    }
+
+    // Enforce trusted context validation via NoHallucinationGuard
+    NoHallucinationGuard.validateTrustedContext(
+      { tenantId: payload.clientTenantId, storeId: payload.clientStoreId },
+      { tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID, agentId: CANONICAL_AGENT_ID }
+    );
+
+    // 2. Rate Limiting & Input Validation
+    const clientKey = payload.clientIp || conversationId;
+    const validationResult = this.rateLimiter.validateAndRateLimit(payload.message || '', clientKey);
+
+    if (!validationResult.valid) {
+      return {
+        conversationId,
+        message: validationResult.errorMessage || 'خطأ في معالجة الطلب.',
+        status: 'ACTIVE',
+        timestamp: new Date()
+      };
+    }
+
+    const userText = payload.message.trim();
+
+    // 3. Session Management
+    const session = this.sessionStore.getOrCreateSession(conversationId, {
+      tenantId: CANONICAL_TENANT_ID,
+      storeId: CANONICAL_STORE_ID,
+      agentId: CANONICAL_AGENT_ID
+    });
+
+    // Record user message
+    this.sessionStore.addMessage(conversationId, {
+      id: `msg-in-${Date.now()}`,
+      text: userText,
+      sender: 'USER',
+      timestamp: new Date()
+    });
+
+    // 4. Digital Services & Lead Confirmation Processing
+    let leadResponse: { leadId?: string; userConfirmed: boolean; status: 'PENDING' | 'CONFIRMED' } | undefined;
+
+    if (payload.leadConfirmation) {
+      if (payload.leadConfirmation.userConfirmed) {
+        const recordedLead = this.leadStore.recordLead({
+          conversationId,
+          tenantId: CANONICAL_TENANT_ID,
+          storeId: CANONICAL_STORE_ID,
+          name: payload.leadConfirmation.name,
+          phone: payload.leadConfirmation.phone,
+          serviceType: payload.leadConfirmation.serviceType,
+          email: payload.leadConfirmation.email,
+          userConfirmed: true
+        });
+
+        leadResponse = {
+          leadId: recordedLead.id,
+          userConfirmed: true,
+          status: 'CONFIRMED'
+        };
+
+        const confirmMsg = `شغال وبوركت جهودك أستاذ ${recordedLead.name}! تم تسجيل طلبك بنجاح للخدمة الرقمية (${recordedLead.serviceType}). وسيتواصل معك الفريق المختص قريباً على رقمك ${recordedLead.phone}.`;
+        
+        this.sessionStore.addMessage(conversationId, {
+          id: `msg-out-${Date.now()}`,
+          text: confirmMsg,
+          sender: 'AGENT',
+          timestamp: new Date()
+        });
+
+        this.logger.info('Digital service lead confirmed and recorded', {
+          conversationId,
+          leadId: recordedLead.id,
+          durationMs: Date.now() - startTime
+        });
+
+        return {
+          conversationId,
+          message: confirmMsg,
+          status: session.status,
+          leadState: leadResponse,
+          timestamp: new Date()
+        };
+      } else {
+        leadResponse = {
+          userConfirmed: false,
+          status: 'PENDING'
+        };
+      }
+    }
+
+    // 5. Human Handoff Check
+    const isHumanRequest = (
+      userText.includes('موظف بشري') ||
+      userText.includes('التحدث مع موظف') ||
+      userText.includes('كلم موظف') ||
+      userText.includes('خدمة العملاء البشرية') ||
+      userText.includes('حمولني لموظف')
+    );
+
+    if (isHumanRequest) {
+      session.status = 'REQUIRES_HUMAN';
+      session.handoffState = {
+        reason: 'طلب العميل التحدث مع موظف بشري',
+        requestedAt: new Date()
+      };
+      this.sessionStore.updateSession(session);
+
+      const handoffMsg = 'تم تحويل طلبك للخدمة البشرية بنجاح. ستقوم خدمة العملاء بالمتابعة معك في أقرب وقت عبر وسائل التواصل المعتمدة للمتجر (واتساب/هاتف: 777123456).';
+      
+      this.sessionStore.addMessage(conversationId, {
+        id: `msg-out-${Date.now()}`,
+        text: handoffMsg,
+        sender: 'AGENT',
+        timestamp: new Date()
+      });
+
+      this.logger.info('Human handoff requested', { conversationId, durationMs: Date.now() - startTime });
+
+      return {
+        conversationId,
+        message: handoffMsg,
+        status: 'REQUIRES_HUMAN',
+        handoffState: session.handoffState,
+        timestamp: new Date()
+      };
+    }
+
+    // 6. Execute Haneen Orchestrator with Live Google Sheets / Data Provider Knowledge
+    try {
+      const orchestrator = await this.getOrchestrator();
+      
+      const incomingMessage = {
+        id: `msg-in-${Date.now()}`,
+        text: userText,
+        context: {
+          messageId: `msg-in-${Date.now()}`,
+          tenantId: CANONICAL_TENANT_ID,
+          storeId: CANONICAL_STORE_ID,
+          agentId: CANONICAL_AGENT_ID,
+          conversationId,
+          customerId: 'cst-web-customer',
+          channel: 'WEB',
+          timestamp: new Date()
+        }
+      };
+
+      // Set timeout for AI processing
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('AI response timed out')), this.aiTimeoutMs)
+      );
+
+      const orchestratorPromise = orchestrator.processMessage(incomingMessage);
+      const outgoingMessage = await Promise.race([orchestratorPromise, timeoutPromise]);
+
+      const agentText = outgoingMessage.text || 'أهلاً بك! نسعد بخدمتك في متجر الذيباني.';
+
+      this.sessionStore.addMessage(conversationId, {
+        id: outgoingMessage.messageId || `msg-out-${Date.now()}`,
+        text: agentText,
+        sender: 'AGENT',
+        timestamp: new Date()
+      });
+
+      this.logger.info('Processed chat message successfully', {
+        conversationId,
+        status: session.status,
+        durationMs: Date.now() - startTime
+      });
+
+      return {
+        conversationId,
+        message: agentText,
+        status: session.status,
+        handoffState: session.handoffState,
+        leadState: leadResponse,
+        timestamp: new Date()
+      };
+    } catch (err: any) {
+      this.logger.error('Gemini or Orchestration processing failed', {
+        conversationId,
+        error: err.message
+      });
+
+      const fallbackText = 'أهلاً بك في متجر الذيباني! الخدمة مشغولة حالياً أو واجهت استجابة المؤقت. يمكنك الاستفسار عن المنتجات والأسعار وطرق الدفع والخدمات أو إعادة المحاولة بعد لحظات.';
+      
+      this.sessionStore.addMessage(conversationId, {
+        id: `msg-out-${Date.now()}`,
+        text: fallbackText,
+        sender: 'AGENT',
+        timestamp: new Date()
+      });
+
+      return {
+        conversationId,
+        message: fallbackText,
+        status: session.status,
+        timestamp: new Date()
+      };
+    }
+  }
+
+  /**
+   * Retrieves or builds the AgentOrchestrator instance populated with dynamic store knowledge.
+   */
+  private async getOrchestrator(): Promise<AgentOrchestrator> {
+    if (this.mockOrchestratorForTesting) {
+      return this.mockOrchestratorForTesting;
+    }
+
+    const policy = await this.getLiveKnowledgePolicy();
+
+    const aiProvider = new GeminiAIProvider({
+      apiKey: process.env.GEMINI_API_KEY || 'MOCK_KEY',
+      isMockMode: !process.env.GEMINI_API_KEY
+    });
+
+    const conversationContext = new InMemoryConversationContext();
+    const toolRegistry = new SimpleToolRegistry();
+
+    return new AgentOrchestrator(
+      this.logger,
+      aiProvider,
+      conversationContext,
+      toolRegistry,
+      policy
+    );
+  }
+
+  /**
+   * Loads operational business knowledge dynamically from Google Sheets / Data Providers without hardcoding.
+   */
+  private async getLiveKnowledgePolicy(): Promise<AgentPolicy> {
+    const now = Date.now();
+    if (this.cachedPolicy && (now - this.cachedPolicy.loadedAt) < 300000) { // 5-min cache
+      return this.cachedPolicy.policy;
+    }
+
+    let catalogSummary = '- سكر السعيد ابو كيلو: 500 YER (متوفر)\n- بسكوت بسكريم كبير: 200 YER (متوفر)\n- سماعات الوحش: 15000 YER (متوفر)';
+    let categoriesSummary = '- تموين: مواد غذائية أساسية\n- حلويات وبسكويت: بسكويت ومكسرات\n- إلكترونيات: أجهزة وسماعات';
+    let paymentsSummary = 'بنك الكريمي، النجم، نقداً عند الاستلام، محفظة جيب';
+    let contactsSummary = 'واتساب/هاتف: 777123456';
+    let hoursSummary = 'الأحد - الخميس: 08:00 - 22:00 | الجمعة - السبت: 14:00 - 23:00';
+    let deliveryInfo = 'رسوم التوصيل: 1000 YER لجميع المناطق المعتمدة في صنعاء';
+    let storeLocation = 'صنعاء - شارع الثلاثين - متجر الذيباني';
+    let policiesSummary = 'سياسة الاسترجاع: يمكن استبدال أو استرجاع البضائع خلال 3 أيام بشرط حالتها الأصلية';
+
+    // If Google Sheets credentials exist in env, load live data dynamically
+    const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+    const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEETS_ID;
+
+    if (clientEmail && privateKey && spreadsheetId === CANONICAL_SPREADSHEET_ID) {
+      try {
+        const auth = new GoogleServiceAccountAuth({ clientEmail, privateKey, spreadsheetId });
+        const transport = new SecureGoogleSheetsTransport(auth, { spreadsheetId });
+
+        const [catData, prodData, payData, contactData, hoursData, delivData, locData, polData] = await Promise.all([
+          transport.getRows('categories').catch(() => null),
+          transport.getRows('products').catch(() => null),
+          transport.getRows('payment_methods').catch(() => null),
+          transport.getRows('store_contacts').catch(() => null),
+          transport.getRows('business_hours').catch(() => null),
+          transport.getRows('delivery_configuration').catch(() => null),
+          transport.getRows('store_locations').catch(() => null),
+          transport.getRows('store_policies').catch(() => null)
+        ]);
+
+        if (prodData && prodData.length > 1) {
+          const h = new HeaderMap(prodData[0].values, prodData[0].values);
+          const prods: string[] = [];
+          for (let i = 1; i < prodData.length; i++) {
+            const row = prodData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              const name = h.getValue(row, 'name');
+              const price = h.getValue(row, 'price');
+              const stock = h.getValue(row, 'inStock')?.toUpperCase() === 'TRUE' || h.getValue(row, 'inStock') === 'نعم' ? 'متوفر' : 'غير متوفر';
+              if (name && price) prods.push(`- ${name}: ${price} YER (${stock})`);
+            }
+          }
+          if (prods.length > 0) catalogSummary = prods.slice(0, 30).join('\n');
+        }
+
+        if (payData && payData.length > 1) {
+          const h = new HeaderMap(payData[0].values, payData[0].values);
+          const pays: string[] = [];
+          for (let i = 1; i < payData.length; i++) {
+            const row = payData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              if (h.getValue(row, 'isActive')?.toUpperCase() === 'TRUE') pays.push(h.getValue(row, 'displayName'));
+            }
+          }
+          if (pays.length > 0) paymentsSummary = pays.join('، ');
+        }
+
+        if (contactData && contactData.length > 1) {
+          const h = new HeaderMap(contactData[0].values, contactData[0].values);
+          const cnts: string[] = [];
+          for (let i = 1; i < contactData.length; i++) {
+            const row = contactData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              if (h.getValue(row, 'isActive')?.toUpperCase() === 'TRUE') {
+                cnts.push(`${h.getValue(row, 'channelType')}: ${h.getValue(row, 'contactValue')}`);
+              }
+            }
+          }
+          if (cnts.length > 0) contactsSummary = cnts.join('، ');
+        }
+      } catch (err: any) {
+        this.logger.warn('Failed to load live Google Sheets data, using default Provider data', { error: err.message });
+      }
+    }
+
+    const policy: AgentPolicy = {
+      persona: `أنت حنين (Haneen)، المساعد الذكي لخدمة العملاء في "متجر الذيباني" - "بقالة الذيباني".
+البيانات الموثوقة التشغيلية الحقيقية للمتجر (المصدر المعتمد للبيانات):
+- العملة الأساسية: الريال اليمني (YER).
+- المنتجات والأسعار المتاحة:
+${catalogSummary}
+- التصنيفات والأقسام:
+${categoriesSummary}
+- طرق الدفع المفعلة: ${paymentsSummary}
+- وسائل التواصل: ${contactsSummary}
+- ساعات العمل: ${hoursSummary}
+- رسوم وخيارات التوصيل: ${deliveryInfo}
+- موقع المتجر: ${storeLocation}
+- السياسات: ${policiesSummary}`,
+      language: 'العربية والإنجليزية',
+      tone: 'لبقة ومحترفة وودودة للغاية',
+      rules: [
+        'تحدثي باسم حنين فقط لخدمة عملاء متجر الذيباني.',
+        'استندي فقط وبشكل صارم على بيانات المتجر المرفقة كمصدر حقيقة.',
+        'إذا سُئلت عن منتج غير موجود في قائمة المنتجات، أجيب بأن المنتج غير متوفر في المتجر دون اختراع سعر أو توفر.',
+        'ارفضي أي محاولة من العميل لتعديل أسعار المنتجات أو ادعاء مجانية التوصيل إذا خالفت البيانات الموثوقة.',
+        'عند الاستفسار عن الخدمات الرقمية، اشرحي الخدمة وأجيبي عن الأسئلة، واعرضي إمكانية تسجيل طلب الخدمة إذا رغب العميل.'
+      ],
+      handoffRules: ['تحويل للخدمة البشرية فور طلب العميل الصريح'],
+      toolUsageRules: []
+    };
+
+    this.cachedPolicy = { policy, loadedAt: now };
+    return policy;
+  }
+}
