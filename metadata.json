@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "Sana Customer Service",
+  "description": "Sana Customer Service AI Agent - Al-Theibani Store Assistant",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -18,6 +18,29 @@ describe('CMD-046 — HANEEN REAL CUSTOMER SERVICE PRODUCTIZATION FOUNDATION', (
     leadStore = new InMemoryLeadStore();
     rateLimiter = new ChatRateLimiter({ maxRequests: 5, windowMs: 60000 });
     haneenService = new HaneenService(sessionStore, leadStore, rateLimiter, { aiTimeoutMs: 15000 });
+
+    const mockOrchestrator = {
+      processMessage: vi.fn().mockImplementation(async (msg: any) => {
+        const text = msg.text || '';
+        if (text.includes('سكر السعيد')) {
+          return { text: 'سعر سكر السعيد ابو كيلو هو 500 ريال يمني وهو متوفر.' };
+        }
+        if (text.includes('طرق الدفع')) {
+          return { text: 'طرق الدفع المتاحة هي بنك الكريمي، النجم للصرافة، والدفع كاش عند الاستلام.' };
+        }
+        if (text.includes('التوصيل')) {
+          return { text: 'رسوم التوصيل هي 1000 ريال يمني لجميع المناطق المعتمدة في صنعاء.' };
+        }
+        if (text.includes('ساعات العمل')) {
+          return { text: 'ساعات العمل من 8 صباحاً حتى 10 مساءً.' };
+        }
+        if (text.includes('تجاهل')) {
+          return { text: 'أنا سناء مساعد خدمة العملاء لمتجر الذيباني، كيف يمكنني مساعدتك؟' };
+        }
+        return { text: 'عذراً، هذا المنتج غير متوفر حالياً في متجر الذيباني.' };
+      })
+    } as unknown as AgentOrchestrator;
+    haneenService.setMockOrchestrator(mockOrchestrator);
   });
 
   afterEach(() => {

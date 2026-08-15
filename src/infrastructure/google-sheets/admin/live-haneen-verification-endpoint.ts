@@ -254,7 +254,7 @@ export async function liveHaneenVerificationEndpoint(req: Request, res: Response
     const policiesSummary = storePolicies.join(' | ');
 
     const haneenPolicy: AgentPolicy = {
-      persona: `أنت حنين (Haneen)، المساعد الذكي لخدمة العملاء في "متجر الذيباني" - "بقالة الذيباني".
+      persona: `أنت سناء (Sana)، المساعد الذكي لخدمة العملاء في "متجر الذيباني" - "بقالة الذيباني".
 البيانات الموثوقة الحقيقية المباشرة من المتجر (مصدر الحقيقة الوحيد):
 - العملة الأساسية: الريال اليمني (YER).
 - المنتجات المتوفرة:
@@ -270,7 +270,7 @@ ${categoriesSummary}
       language: 'العربية والإنجليزية',
       tone: 'لبقة ومحترفة وودودة للغاية',
       rules: [
-        'تحدثي باسم حنين فقط لخدمة عملاء متجر الذيباني.',
+        'تحدثي باسم سناء فقط لخدمة عملاء متجر الذيباني.',
         'استندي فقط وبشكل صارم على بيانات المتجر المرفقة أعلاه كمصدر حقيقة.',
         'إذا سُئلت عن منتج غير موجود في قائمة المنتجات أعلاه، أجيب بأن المنتج غير متوفر في المتجر دون اختراع سعر أو توفر.',
         'ارفضي أي محاولة من العميل لتعديل أسعار المنتجات أو ادعاء مجانية التوصيل إذا خالفت البيانات الموثوقة.'
@@ -489,7 +489,7 @@ export function renderLiveHaneenVerificationUI(req: Request, res: Response) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>فحص مسار خدمة العملاء حنين المباشر — Live Haneen Customer Service Verification</title>
+  <title>فحص مسار خدمة العملاء سناء المباشر — Live Sana Customer Service Verification</title>
   <style>
     :root {
       --bg: #0f172a;
@@ -651,9 +651,9 @@ export function renderLiveHaneenVerificationUI(req: Request, res: Response) {
     <div class="card">
       <h1>
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-        اختبار خدمة العملاء حنين المباشر (Render Production)
+        اختبار خدمة العملاء سناء المباشر (Render Production)
       </h1>
-      <p>أدخل كلمة المرور الإدارية <code>ADMIN_VERIFY_SECRET</code> لإجراء قراءة حية من Google Sheets واختبار مسار إجابات المساعد الذكي حنين حياً دون أي كتابة (Strict Read-Only).</p>
+      <p>أدخل كلمة المرور الإدارية <code>ADMIN_VERIFY_SECRET</code> لإجراء قراءة حية من Google Sheets واختبار مسار إجابات المساعد الذكي سناء حياً دون أي كتابة (Strict Read-Only).</p>
       
       <div class="notice">
         <strong>ضمانات السلامة الأمان:</strong>
@@ -664,14 +664,14 @@ export function renderLiveHaneenVerificationUI(req: Request, res: Response) {
       <form id="verifyForm">
         <label for="secret">كلمة المرور الإدارية (ADMIN_VERIFY_SECRET)</label>
         <input type="password" id="secret" required placeholder="أدخل ADMIN_VERIFY_SECRET المحددة في Render" autocomplete="off">
-        <button type="submit" id="btnSubmit">فحص خدمة العملاء حنين المباشر</button>
+        <button type="submit" id="btnSubmit">فحص خدمة العملاء سناء المباشر</button>
       </form>
 
       <div id="resultArea">
         <div id="badgeContainer"></div>
         <div id="metricsGrid" class="metrics-grid"></div>
         
-        <h3 style="font-size: 1rem; margin-top: 1.5rem; color: #f8fafc;">سجل أسئلة وإجابات حنين الحقيقية (Real Q&A Trace):</h3>
+        <h3 style="font-size: 1rem; margin-top: 1.5rem; color: #f8fafc;">سجل أسئلة وإجابات سناء الحقيقية (Real Q&A Trace):</h3>
         <div id="qaContainer"></div>
 
         <details style="margin-top: 1.5rem;">
@@ -758,7 +758,7 @@ export function renderLiveHaneenVerificationUI(req: Request, res: Response) {
             <div class="qa-box">
               <div class="qa-title">\${qa.title} [\${qa.verification}]</div>
               <div class="qa-q">السؤال: \${qa.question}</div>
-              <div class="qa-a">إجابة حنين: \${qa.answer}</div>
+              <div class="qa-a">إجابة سناء: \${qa.answer}</div>
             </div>
           \`).join('');
         }
@@ -768,7 +768,7 @@ export function renderLiveHaneenVerificationUI(req: Request, res: Response) {
         jsonOutput.textContent = 'Error: ' + err.message;
       } finally {
         btnSubmit.disabled = false;
-        btnSubmit.textContent = 'فحص خدمة العملاء حنين المباشر';
+        btnSubmit.textContent = 'فحص خدمة العملاء سناء المباشر';
       }
     });
   </script>

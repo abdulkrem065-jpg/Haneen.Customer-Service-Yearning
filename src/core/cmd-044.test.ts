@@ -180,7 +180,7 @@ describe('CMD-044 — LIVE RENDER HANEEN READ-BACK & REAL CUSTOMER SERVICE VERIF
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/html; charset=utf-8');
       expect(htmlResponse).toContain('<!DOCTYPE html>');
       expect(htmlResponse).toContain('input type="password" id="secret"');
-      expect(htmlResponse).toContain('فحص خدمة العملاء حنين المباشر');
+      expect(htmlResponse).toContain('فحص خدمة العملاء');
       expect(htmlResponse).toContain('/api/admin/live-haneen-verification');
       expect(htmlResponse).not.toContain('localStorage.setItem');
       expect(htmlResponse).not.toContain('sessionStorage.setItem');

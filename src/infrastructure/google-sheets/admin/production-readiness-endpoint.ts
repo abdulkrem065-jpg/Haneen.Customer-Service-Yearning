@@ -105,7 +105,7 @@ export async function productionReadinessEndpoint(req: Request, res: Response) {
 
     if (sheets.includes('agent_config')) {
       const rows = await transport.getRows('agent_config');
-      agentFound = rows.some(r => r.values.includes(CANONICAL_AGENT_ID) || r.values.some(v => v?.includes('حنين')));
+      agentFound = rows.some(r => r.values.includes(CANONICAL_AGENT_ID) || r.values.some(v => v?.includes('سناء') || v?.includes('حنين')));
     }
 
     if (sheets.includes('store_settings')) {

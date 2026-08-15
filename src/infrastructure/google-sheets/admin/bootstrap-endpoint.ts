@@ -110,14 +110,14 @@ export async function bootstrapTenantEndpoint(req: Request, res: Response) {
     
     const agentNameIndex = agentConfigRows[0]?.indexOf('name') ?? 3;
     const agentStoreIndex = agentConfigRows[0]?.indexOf('storeId') ?? 2;
-    const existingAgent = agentConfigRows.slice(1).find(row => row[agentNameIndex] === 'حنين' && row[agentStoreIndex] === storeId);
+    const existingAgent = agentConfigRows.slice(1).find(row => (row[agentNameIndex] === 'سناء' || row[agentNameIndex] === 'حنين') && row[agentStoreIndex] === storeId);
     
     if (existingAgent) {
-      results.push(`[IDEMPOTENCY] Agent config 'حنين' already exists for store ${storeId}.`);
+      results.push(`[IDEMPOTENCY] Agent config 'سناء' already exists for store ${storeId}.`);
     } else {
       const agentId = generateId('agt');
-      await appendRow('agent_config', [agentId, tenantId, storeId, 'حنين', 'AI Customer Service Agent', 'Professional and friendly', 'Arabic and English']);
-      results.push(`[CREATED] Agent config 'حنين' with ID: ${agentId}.`);
+      await appendRow('agent_config', [agentId, tenantId, storeId, 'سناء', 'AI Customer Service Agent', 'Professional and friendly', 'Arabic and English']);
+      results.push(`[CREATED] Agent config 'سناء' with ID: ${agentId}.`);
     }
     
     const settingsStoreIndex = storeSettingsRows[0]?.indexOf('storeId') ?? 2;

@@ -144,7 +144,7 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
   const [agentIdentityData, setAgentIdentityData] = useState({
     displayName: 'سناء',
     role: 'المساعد الذكي لخدمة العملاء',
-    greeting: 'أهلاً بك! أنا سناء، مساعدتك الذكية لخدمة العملاء في متجر الذيباني. يسعدني إجابة جميع استفساراتك حول المنتجات والأسعار وطرق الدفع وساعات العمل والتوصيل والخدمات الرقمية. كيف يمكنني مساعدتك اليوم؟'
+    greeting: 'أهلًا بك 👋 أنا سناء من متجر الذيباني.\nماذا تبحث عنه اليوم؟ اترك الباقي لي.'
   });
 
   const [trustedContext] = useState({

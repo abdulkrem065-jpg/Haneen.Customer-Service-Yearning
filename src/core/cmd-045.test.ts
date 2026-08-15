@@ -182,7 +182,7 @@ describe('CMD-045 — FINAL LIVE CUSTOMER SERVICE ACCEPTANCE TEST', () => {
 
       expect(res.setHeader).toHaveBeenCalledWith('Content-Type', 'text/html; charset=utf-8');
       expect(htmlResponse).toContain('<!DOCTYPE html>');
-      expect(htmlResponse).toContain('فحص خدمة العملاء حنين المباشر');
+      expect(htmlResponse).toContain('فحص خدمة العملاء');
       expect(htmlResponse).not.toContain('process.env');
       expect(htmlResponse).not.toContain('ADMIN_VERIFY_SECRET=');
     });

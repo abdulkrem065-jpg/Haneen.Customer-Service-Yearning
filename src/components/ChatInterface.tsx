@@ -61,7 +61,7 @@ export const ChatInterface: React.FC = () => {
       setMessages([
         {
           id: 'msg-welcome',
-          text: agentIdentity.greeting || `أهلاً بك! أنا ${agentIdentity.displayName}، مساعدتك الذكية لخدمة العملاء في متجر الذيباني. يسعدني إجابة جميع استفساراتك حول المنتجات والأسعار وطرق الدفع وساعات العمل والتوصيل والخدمات الرقمية. كيف يمكنني مساعدتك اليوم؟`,
+          text: agentIdentity.greeting || `أهلًا بك 👋 أنا ${agentIdentity.displayName} من متجر الذيباني.\nماذا تبحث عنه اليوم؟ اترك الباقي لي.`,
           sender: 'AGENT',
           timestamp: new Date()
         }
@@ -77,7 +77,7 @@ export const ChatInterface: React.FC = () => {
     setMessages([
       {
         id: `msg-welcome-${Date.now()}`,
-        text: `أهلاً بك في محادثة جديدة! أنا ${agentIdentity.displayName} جاهزة لمساعدتك في متجر الذيباني. تفضل بطرح استفسارك.`,
+        text: `أهلًا بك 👋 أنا ${agentIdentity.displayName} من متجر الذيباني.\nماذا تبحث عنه اليوم؟ اترك الباقي لي.`,
         sender: 'AGENT',
         timestamp: new Date()
       }
