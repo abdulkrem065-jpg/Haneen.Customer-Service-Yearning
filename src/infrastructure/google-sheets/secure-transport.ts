@@ -45,7 +45,7 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
       const api = await this.getSheetsAPI();
       const response = await api.spreadsheets.values.get({
         spreadsheetId: this.spreadsheetId,
-        range: `${sheetName}!A:Z`,
+        range: `'${sheetName}'!A:Z`,
       });
       
       const values = response.data.values;
