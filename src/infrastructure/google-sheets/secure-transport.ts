@@ -7,6 +7,9 @@ import { ProviderError, DataUnavailableError } from '../../core/data/errors';
 export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
   private sheets: sheets_v4.Sheets | null = null;
   private readonly spreadsheetId: string;
+  private cachedMetadata: sheets_v4.Schema$Spreadsheet | null = null;
+  private metadataCachedAt: number = 0;
+  private readonly METADATA_TTL_MS = 15000;
 
   constructor(
     private authClient: IGoogleAuthClient,
@@ -27,25 +30,54 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
     return this.sheets;
   }
 
-  async getSpreadsheetMetadata(): Promise<sheets_v4.Schema$Spreadsheet> {
+  async getSpreadsheetMetadata(forceRefresh: boolean = false): Promise<sheets_v4.Schema$Spreadsheet> {
+    const now = Date.now();
+    if (!forceRefresh && this.cachedMetadata && (now - this.metadataCachedAt < this.METADATA_TTL_MS)) {
+      return this.cachedMetadata;
+    }
+
     try {
       const api = await this.getSheetsAPI();
       const response = await api.spreadsheets.get({
         spreadsheetId: this.spreadsheetId,
       });
+      this.cachedMetadata = response.data;
+      this.metadataCachedAt = now;
       return response.data;
     } catch (error: any) {
       this.handleApiError(error);
-      throw error; // Will be mapped by handleApiError, but TS needs return/throw
+      throw error;
     }
   }
 
+  async hasSheet(sheetName: string): Promise<boolean> {
+    try {
+      const metadata = await this.getSpreadsheetMetadata();
+      return Boolean(metadata.sheets?.some((s: any) => s.properties?.title === sheetName));
+    } catch (error: any) {
+      // If metadata call fails (e.g., auth/network), error propagates
+      throw error;
+    }
+  }
+
+  private buildA1Range(sheetName: string, rangeSpec: string = 'A:Z'): string {
+    const cleanTitle = sheetName.replace(/'/g, "''");
+    const needsQuotes = /[\s\-\'\"]/.test(sheetName);
+    return needsQuotes ? `'${cleanTitle}'!${rangeSpec}` : `${cleanTitle}!${rangeSpec}`;
+  }
+
   async getRows(sheetName: string): Promise<SheetRow[]> {
+    const exists = await this.hasSheet(sheetName);
+    if (!exists) {
+      // SHEET_NOT_FOUND: Return empty rows cleanly without invoking invalid range endpoint
+      return [];
+    }
+
     try {
       const api = await this.getSheetsAPI();
       const response = await api.spreadsheets.values.get({
         spreadsheetId: this.spreadsheetId,
-        range: `'${sheetName}'!A:Z`,
+        range: this.buildA1Range(sheetName, 'A:Z'),
       });
       
       const values = response.data.values;
