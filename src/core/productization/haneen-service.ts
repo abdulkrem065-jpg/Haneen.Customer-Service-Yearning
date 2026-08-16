@@ -243,6 +243,8 @@ export class HaneenService implements IHaneenService {
     // 5. Human Handoff Check
     const isHumanRequest = (
       userText.includes('موظف بشري') ||
+      userText.includes('موظفاً بشرياً') ||
+      userText.includes('أريد موظف') ||
       userText.includes('التحدث مع موظف') ||
       userText.includes('كلم موظف') ||
       userText.includes('خدمة العملاء البشرية') ||
@@ -332,7 +334,7 @@ export class HaneenService implements IHaneenService {
         error: err.message
       });
 
-      const fallbackText = `أهلاً بك في متجر الذيباني! أنا ${agentIdentity.displayName}، والخدمة مشغولة حالياً أو واجهت استجابة المؤقت. يمكنك الاستفسار عن المنتجات والأسعار وطرق الدفع والخدمات أو إعادة المحاولة بعد لحظات.`;
+      const fallbackText = `عذراً، الخدمة مشغولة حالياً. يمكنك إعادة المحاولة بعد لحظات وسنسعد بخدمتك.`;
 
       this.sessionStore.addMessage(conversationId, {
         id: `msg-out-${Date.now()}`,
