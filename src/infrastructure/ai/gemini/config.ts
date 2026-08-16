@@ -1,7 +1,7 @@
 export const GEMINI_MODELS = {
-  COMPLEX: 'gemini-3.1-pro-preview',
-  GENERAL: 'gemini-3.5-flash',
-  FAST: 'gemini-3.1-flash-lite',
+  COMPLEX: 'gemini-2.5-pro',
+  GENERAL: 'gemini-2.5-flash',
+  FAST: 'gemini-2.5-flash',
 } as const;
 
 export type GeminiModelAlias = 'complex' | 'general' | 'fast' | string;
@@ -17,14 +17,38 @@ export interface GeminiConfig {
   enableThinking?: boolean;
 }
 
+/**
+ * Centralized Gemini model normalization helper.
+ * Strips outer whitespace, removes single or double 'models/' prefixes required by @google/genai SDK,
+ * resolves aliases ('complex', 'general', 'fast'), and ensures valid model ID format.
+ */
+export function normalizeGeminiModelName(rawModelName?: string): string {
+  if (!rawModelName) return GEMINI_MODELS.GENERAL;
+  let cleaned = rawModelName.trim();
+  if (!cleaned) return GEMINI_MODELS.GENERAL;
+
+  // Strip all leading 'models/' prefixes (case-insensitive) to prevent double-prefixing in @google/genai SDK
+  while (/^models\//i.test(cleaned)) {
+    cleaned = cleaned.replace(/^models\//i, '').trim();
+  }
+
+  if (!cleaned) return GEMINI_MODELS.GENERAL;
+
+  const lower = cleaned.toLowerCase();
+  if (lower === 'complex' || lower === 'pro') return GEMINI_MODELS.COMPLEX;
+  if (lower === 'general' || lower === 'flash') return GEMINI_MODELS.GENERAL;
+  if (lower === 'fast' || lower === 'lite') return GEMINI_MODELS.FAST;
+
+  // Handle legacy preview aliases smoothly to valid canonical models
+  if (lower.includes('3.1-pro') || lower.includes('1.5-pro')) return GEMINI_MODELS.COMPLEX;
+  if (lower.includes('3.5-flash') || lower.includes('1.5-flash') || lower.includes('3.1-flash')) return GEMINI_MODELS.GENERAL;
+
+  return cleaned;
+}
+
 export class GeminiConfigValidator {
   static resolveModel(modelName?: string): string {
-    if (!modelName) return GEMINI_MODELS.GENERAL;
-    const lower = modelName.toLowerCase().trim();
-    if (lower === 'complex' || lower === 'pro') return GEMINI_MODELS.COMPLEX;
-    if (lower === 'general' || lower === 'flash') return GEMINI_MODELS.GENERAL;
-    if (lower === 'fast' || lower === 'lite') return GEMINI_MODELS.FAST;
-    return modelName;
+    return normalizeGeminiModelName(modelName);
   }
 
   static validate(customConfig?: Partial<GeminiConfig>): GeminiConfig {
@@ -33,7 +57,7 @@ export class GeminiConfigValidator {
     const model = this.resolveModel(rawModel);
     const temperature = customConfig?.temperature ?? (process.env.GEMINI_TEMPERATURE ? parseFloat(process.env.GEMINI_TEMPERATURE) : 0.2);
     
-    // Enable high thinking by default for gemini-3.1-pro-preview or if explicitly requested
+    // Enable high thinking by default for complex model or if explicitly requested
     const isComplexModel = model === GEMINI_MODELS.COMPLEX;
     const enableThinking = customConfig?.enableThinking ?? (process.env.GEMINI_ENABLE_THINKING === 'true' || isComplexModel);
 

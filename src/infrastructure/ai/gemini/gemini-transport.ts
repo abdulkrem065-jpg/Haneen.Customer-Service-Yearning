@@ -1,5 +1,5 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-import { GeminiConfig, GEMINI_MODELS } from './config';
+import { GeminiConfig, GEMINI_MODELS, normalizeGeminiModelName } from './config';
 import { IGeminiTransport, GeminiTransportParams } from './transport';
 import { AIProviderResponse } from '../../../core/interfaces';
 import { AIProviderError } from '../../../core/errors';
@@ -43,12 +43,13 @@ export class RealGeminiTransport implements IGeminiTransport {
     ] : undefined;
 
     // Deduplicated list of models to try in sequence upon rate limits
-    const modelsToTry: string[] = [this.config.model];
-    if (!modelsToTry.includes(GEMINI_MODELS.GENERAL)) {
-      modelsToTry.push(GEMINI_MODELS.GENERAL);
-    }
-    if (!modelsToTry.includes(GEMINI_MODELS.FAST)) {
-      modelsToTry.push(GEMINI_MODELS.FAST);
+    const rawModels: string[] = [this.config.model, GEMINI_MODELS.GENERAL, GEMINI_MODELS.FAST];
+    const modelsToTry: string[] = [];
+    for (const m of rawModels) {
+      const normalized = normalizeGeminiModelName(m);
+      if (!modelsToTry.includes(normalized)) {
+        modelsToTry.push(normalized);
+      }
     }
 
     let lastError: Error | null = null;

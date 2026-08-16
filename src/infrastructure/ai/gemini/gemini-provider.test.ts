@@ -330,15 +330,15 @@ describe('CMD-015: Gemini AI Provider Unit & Integration Tests', () => {
     const generalProvider = GeminiAIProvider.createForTask('general', { isMockMode: true });
     const fastProvider = GeminiAIProvider.createForTask('fast', { isMockMode: true });
 
-    expect(complexProvider.getConfig().model).toBe('gemini-3.1-pro-preview');
+    expect(complexProvider.getConfig().model).toBe('gemini-2.5-pro');
     expect(complexProvider.getConfig().enableThinking).toBe(true);
     expect(complexProvider.getConfig().maxOutputTokens).toBeUndefined(); // Omitted for thinking mode
 
-    expect(generalProvider.getConfig().model).toBe('gemini-3.5-flash');
+    expect(generalProvider.getConfig().model).toBe('gemini-2.5-flash');
     expect(generalProvider.getConfig().enableThinking).toBe(false);
     expect(generalProvider.getConfig().maxOutputTokens).toBe(2048);
 
-    expect(fastProvider.getConfig().model).toBe('gemini-3.1-flash-lite');
+    expect(fastProvider.getConfig().model).toBe('gemini-2.5-flash');
     expect(fastProvider.getConfig().enableThinking).toBe(false);
     expect(fastProvider.getConfig().maxOutputTokens).toBe(2048);
   });
