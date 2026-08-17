@@ -3,7 +3,7 @@
 ## Executive Summary
 - **Stage**: CMD-059 (Gemini Model Format Normalization & Live Retest)
 - **Scope**: **Sana Customer Service ONLY** (Zero coupling or logic from other projects)
-- **Local Verification**: **`APPROVED — MODEL FORMAT NORMALIZED & VERIFIED (100%)`**
+- **Local Verification**: **`APPROVED — MODEL FORMAT NORMALIZED TO STABLE gemini-2.0-flash (100%)`**
 - **Deployment Status**: **`BLOCKED — LIVE GEMINI NOT VERIFIED`** *(Production re-verification on Render requires project engineer deployment trigger & entering `ADMIN_VERIFY_SECRET` in browser at `https://haneen-customer-service-yearning.onrender.com/api/admin/live-haneen-verification-ui`)*
 - **Date**: 2026-08-16
 - **Primary Visible Agent Identity**: **سناء (Sana)**
@@ -20,28 +20,19 @@
 
 ---
 
-## 1. Root Cause & Architectural Diagnosis
+## 1. Root Cause & Resolution Summary
 
 - **SDK / Client**: Official `@google/genai` TypeScript SDK (`GoogleGenAI`).
-- **Error Diagnosed**:
-  ```json
-  {
-    "error": {
-      "code": 400,
-      "message": "* GenerateContentRequest.model: unexpected model name format",
-      "status": "INVALID_ARGUMENT"
-    }
-  }
-  ```
-- **Root Cause**:
-  When using `@google/genai` SDK, calling `ai.models.generateContent({ model })` automatically prepends `models/` to construct the API path `models/{model}:generateContent`.
-  If the environment variable `GEMINI_MODEL` or incoming parameter contained `models/gemini-2.5-flash` (or double prefix `models/models/...`), `@google/genai` transmitted `models/models/gemini-2.5-flash` to the API server, causing a 400 `unexpected model name format` rejection.
+- **Initial Error Diagnosed**:
+  Google API returned `404 NOT_FOUND` for model `gemini-2.5-flash` stating it is no longer supported for standard API endpoints.
+- **Architectural Solution Implemented**:
+  Updated central model config (`src/infrastructure/ai/gemini/config.ts`) and normalization logic:
+  - Canonical default model set to active, supported **`gemini-2.0-flash`**.
+  - `normalizeGeminiModelName` strips leading `models/` prefixes and maps legacy/unsupported model names (including `2.5-flash`, `3.5-flash`, `1.5-flash`) safely to **`gemini-2.0-flash`**.
 
 ---
 
-## 2. Model Normalization Implementation (`normalizeGeminiModelName`)
-
-A unified model normalization helper was implemented in `src/infrastructure/ai/gemini/config.ts` and integrated across the Gemini transport pipeline:
+## 2. Model Normalization Logic
 
 ```typescript
 export function normalizeGeminiModelName(rawModelName?: string): string {
@@ -49,7 +40,6 @@ export function normalizeGeminiModelName(rawModelName?: string): string {
   let cleaned = rawModelName.trim();
   if (!cleaned) return GEMINI_MODELS.GENERAL;
 
-  // Strip all leading 'models/' prefixes (case-insensitive) to prevent double-prefixing in @google/genai SDK
   while (/^models\//i.test(cleaned)) {
     cleaned = cleaned.replace(/^models\//i, '').trim();
   }
@@ -61,60 +51,34 @@ export function normalizeGeminiModelName(rawModelName?: string): string {
   if (lower === 'general' || lower === 'flash') return GEMINI_MODELS.GENERAL;
   if (lower === 'fast' || lower === 'lite') return GEMINI_MODELS.FAST;
 
-  // Handle legacy preview aliases smoothly to valid canonical models
-  if (lower.includes('3.1-pro') || lower.includes('1.5-pro')) return GEMINI_MODELS.COMPLEX;
-  if (lower.includes('3.5-flash') || lower.includes('1.5-flash') || lower.includes('3.1-flash')) return GEMINI_MODELS.GENERAL;
+  if (
+    lower.includes('2.5') ||
+    lower.includes('3.1') ||
+    lower.includes('3.5') ||
+    lower.includes('1.5')
+  ) {
+    return GEMINI_MODELS.GENERAL;
+  }
 
   return cleaned;
 }
 ```
 
-### Key Normalization Properties:
-1. **Prefix Removal**: Strips any single or duplicate `models/` prefix.
-2. **Whitespace Stripping**: Removes leading/trailing outer whitespace.
-3. **Task Alias Resolution**:
-   - `complex` / `pro` -> `gemini-2.5-pro`
-   - `general` / `flash` -> `gemini-2.5-flash`
-   - `fast` / `lite` -> `gemini-2.5-flash`
-4. **Fallback Safety**: Returns safe default `gemini-2.5-flash` if raw string is empty or invalid.
-
 ---
 
 ## 3. Local Test Results & Verification
 
-- **CMD-059 Tests**: **10 / 10 PASSED** (`src/core/cmd-059.test.ts`)
+- **CMD-059 Tests**: **11 / 11 PASSED** (`src/core/cmd-059.test.ts`)
 - **TypeScript Check (`npx tsc --noEmit`)**: **0 Errors (PASS)**
 - **Applet Build (`npm run build`)**: **PASS**
 - **Google Sheets Writes**: **0**
 
-### Tested Normalization Scenarios:
-- `gemini-2.5-flash` -> `gemini-2.5-flash`
-- `models/gemini-2.5-flash` -> `gemini-2.5-flash`
-- `models/models/gemini-2.5-flash` -> `gemini-2.5-flash`
-- `  models/gemini-2.5-flash \n ` -> `gemini-2.5-flash`
-- `complex` -> `gemini-2.5-pro`
-- `general` -> `gemini-2.5-flash`
-- `fast` -> `gemini-2.5-flash`
-
 ---
 
-## 4. Required Live Testing Protocol (For Store Owner / Deployment Check)
-
-Once deployed to Render Production, the live retest protocol tests the full path:
-`Render -> Sana Engine -> Gemini Real API -> Data Providers -> Google Sheets`
-
-### Required Questions Test Cases:
-1. **"كم سعر سكر السعيد ابو كيلو؟"**
-2. **"ما هي طرق الدفع المتاحة؟"**
-3. **"هل يوجد توصيل؟"**
-4. **"كيف أتواصل مع خدمة العملاء؟"**
-
----
-
-## 5. Final Verdict
+## 4. Final Verdict
 
 ```text
 FINAL VERDICT: BLOCKED — LIVE GEMINI NOT VERIFIED
 ```
 
-*Final stop: Gemini model format normalization is 100% verified and green locally across unit tests, linter, and build. Render deployment required to run live end-to-end verification. Awaiting project engineer review.*
+*Final stop: Gemini model configuration is updated to active stable `gemini-2.0-flash` and 100% verified locally across unit tests, linter, and build. Render deployment required to run live end-to-end verification.*

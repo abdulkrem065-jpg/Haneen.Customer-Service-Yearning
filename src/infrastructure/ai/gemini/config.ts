@@ -1,7 +1,7 @@
 export const GEMINI_MODELS = {
-  COMPLEX: 'gemini-2.5-pro',
-  GENERAL: 'gemini-2.5-flash',
-  FAST: 'gemini-2.5-flash',
+  COMPLEX: 'gemini-2.0-flash',
+  GENERAL: 'gemini-2.0-flash',
+  FAST: 'gemini-2.0-flash',
 } as const;
 
 export type GeminiModelAlias = 'complex' | 'general' | 'fast' | string;
@@ -20,7 +20,7 @@ export interface GeminiConfig {
 /**
  * Centralized Gemini model normalization helper.
  * Strips outer whitespace, removes single or double 'models/' prefixes required by @google/genai SDK,
- * resolves aliases ('complex', 'general', 'fast'), and ensures valid model ID format.
+ * resolves aliases ('complex', 'general', 'fast'), and maps legacy/unavailable models to active 'gemini-2.0-flash'.
  */
 export function normalizeGeminiModelName(rawModelName?: string): string {
   if (!rawModelName) return GEMINI_MODELS.GENERAL;
@@ -39,9 +39,15 @@ export function normalizeGeminiModelName(rawModelName?: string): string {
   if (lower === 'general' || lower === 'flash') return GEMINI_MODELS.GENERAL;
   if (lower === 'fast' || lower === 'lite') return GEMINI_MODELS.FAST;
 
-  // Handle legacy preview aliases smoothly to valid canonical models
-  if (lower.includes('3.1-pro') || lower.includes('1.5-pro')) return GEMINI_MODELS.COMPLEX;
-  if (lower.includes('3.5-flash') || lower.includes('1.5-flash') || lower.includes('3.1-flash')) return GEMINI_MODELS.GENERAL;
+  // Map legacy, preview, or unavailable model names to active stable gemini-2.0-flash
+  if (
+    lower.includes('2.5') ||
+    lower.includes('3.1') ||
+    lower.includes('3.5') ||
+    lower.includes('1.5')
+  ) {
+    return GEMINI_MODELS.GENERAL;
+  }
 
   return cleaned;
 }
@@ -57,9 +63,10 @@ export class GeminiConfigValidator {
     const model = this.resolveModel(rawModel);
     const temperature = customConfig?.temperature ?? (process.env.GEMINI_TEMPERATURE ? parseFloat(process.env.GEMINI_TEMPERATURE) : 0.2);
     
-    // Enable high thinking by default for complex model or if explicitly requested
-    const isComplexModel = model === GEMINI_MODELS.COMPLEX;
-    const enableThinking = customConfig?.enableThinking ?? (process.env.GEMINI_ENABLE_THINKING === 'true' || isComplexModel);
+    // Enable high thinking by default for 'complex' task alias or if explicitly requested
+    const rawModelLower = (rawModel || '').toLowerCase().trim();
+    const isComplexTask = rawModelLower === 'complex' || rawModelLower === 'pro';
+    const enableThinking = customConfig?.enableThinking ?? (process.env.GEMINI_ENABLE_THINKING === 'true' || isComplexTask);
 
     // Omit maxOutputTokens when high thinking is enabled as required by Gemini API guidelines
     let maxOutputTokens: number | undefined;
