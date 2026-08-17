@@ -12,6 +12,7 @@ import { AgentIdentityStore, AgentIdentityConfig } from './agent-identity.js';
 import { HeaderMap } from '../../infrastructure/google-sheets/header-map.js';
 import { SecureGoogleSheetsTransport } from '../../infrastructure/google-sheets/secure-transport.js';
 import { GoogleServiceAccountAuth } from '../../infrastructure/google-sheets/auth.js';
+import { IGoogleSheetsTransport } from '../../infrastructure/google-sheets/transport.js';
 
 export const CANONICAL_SPREADSHEET_ID = '1b8x4Ub263-Yxbs8_ypjTWrV1_sgM9gLoE3gRx8U2mLo';
 export const CANONICAL_TENANT_ID = 'tnt-41f0d530';
@@ -78,18 +79,24 @@ export class HaneenService implements IHaneenService {
   private mockOrchestratorForTesting: AgentOrchestrator | null = null;
 
   private aiTimeoutMs: number;
+  private sheetsTransport: IGoogleSheetsTransport | null = null;
 
   constructor(
     sessionStore?: InMemorySessionStore,
     leadStore?: InMemoryLeadStore,
     rateLimiter?: ChatRateLimiter,
-    options?: { aiTimeoutMs?: number; identityStore?: AgentIdentityStore }
+    options?: { aiTimeoutMs?: number; identityStore?: AgentIdentityStore; sheetsTransport?: IGoogleSheetsTransport }
   ) {
     this.sessionStore = sessionStore || new InMemorySessionStore();
     this.leadStore = leadStore || new InMemoryLeadStore();
     this.rateLimiter = rateLimiter || new ChatRateLimiter({ maxRequests: 30, windowMs: 60000 });
     this.identityStore = options?.identityStore || AgentIdentityStore.getInstance();
     this.aiTimeoutMs = options?.aiTimeoutMs ?? 15000;
+    this.sheetsTransport = options?.sheetsTransport || null;
+  }
+
+  public invalidatePolicyCache(): void {
+    this.cachedPolicy = null;
   }
 
   public setMockOrchestrator(orchestrator: AgentOrchestrator): void {
@@ -397,21 +404,38 @@ export class HaneenService implements IHaneenService {
     const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
     const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEETS_ID;
 
-    if (clientEmail && privateKey && spreadsheetId === CANONICAL_SPREADSHEET_ID) {
-      try {
-        const auth = new GoogleServiceAccountAuth({ clientEmail, privateKey, spreadsheetId });
-        const transport = new SecureGoogleSheetsTransport(auth, { spreadsheetId });
+    let transportToUse = this.sheetsTransport;
+    if (!transportToUse && clientEmail && privateKey && spreadsheetId === CANONICAL_SPREADSHEET_ID) {
+      const auth = new GoogleServiceAccountAuth({ clientEmail, privateKey, spreadsheetId });
+      transportToUse = new SecureGoogleSheetsTransport(auth, { spreadsheetId });
+    }
 
+    if (transportToUse) {
+      try {
         const [catData, prodData, payData, contactData, hoursData, delivData, locData, polData] = await Promise.all([
-          transport.getRows('categories').catch(() => null),
-          transport.getRows('products').catch(() => null),
-          transport.getRows('payment_methods').catch(() => null),
-          transport.getRows('store_contacts').catch(() => null),
-          transport.getRows('business_hours').catch(() => null),
-          transport.getRows('delivery_configuration').catch(() => null),
-          transport.getRows('store_locations').catch(() => null),
-          transport.getRows('store_policies').catch(() => null)
+          transportToUse.getRows('categories').catch(() => null),
+          transportToUse.getRows('products').catch(() => null),
+          transportToUse.getRows('payment_methods').catch(() => null),
+          transportToUse.getRows('store_contacts').catch(() => null),
+          transportToUse.getRows('business_hours').catch(() => null),
+          transportToUse.getRows('delivery_configuration').catch(() => null),
+          transportToUse.getRows('store_locations').catch(() => null),
+          transportToUse.getRows('store_policies').catch(() => null)
         ]);
+
+        if (catData && catData.length > 1) {
+          const h = new HeaderMap(catData[0].values, catData[0].values);
+          const cats: string[] = [];
+          for (let i = 1; i < catData.length; i++) {
+            const row = catData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              const name = h.getValue(row, 'name');
+              const desc = h.getValue(row, 'description');
+              if (name) cats.push(`- ${name}${desc ? `: ${desc}` : ''}`);
+            }
+          }
+          if (cats.length > 0) categoriesSummary = cats.join('\n');
+        }
 
         if (prodData && prodData.length > 1) {
           const h = new HeaderMap(prodData[0].values, prodData[0].values);
@@ -421,11 +445,12 @@ export class HaneenService implements IHaneenService {
             if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
               const name = h.getValue(row, 'name');
               const price = h.getValue(row, 'price');
-              const stock = h.getValue(row, 'inStock')?.toUpperCase() === 'TRUE' || h.getValue(row, 'inStock') === 'نعم' ? 'متوفر' : 'غير متوفر';
+              const stockVal = h.getValue(row, 'inStock')?.toUpperCase();
+              const stock = (stockVal === 'TRUE' || stockVal === '1' || stockVal === 'YES' || h.getValue(row, 'inStock') === 'نعم') ? 'متوفر' : 'غير متوفر';
               if (name && price) prods.push(`- ${name}: ${price} YER (${stock})`);
             }
           }
-          if (prods.length > 0) catalogSummary = prods.slice(0, 30).join('\n');
+          if (prods.length > 0) catalogSummary = prods.join('\n');
         }
 
         if (payData && payData.length > 1) {
@@ -434,7 +459,12 @@ export class HaneenService implements IHaneenService {
           for (let i = 1; i < payData.length; i++) {
             const row = payData[i].values;
             if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
-              if (h.getValue(row, 'isActive')?.toUpperCase() === 'TRUE') pays.push(h.getValue(row, 'displayName'));
+              const activeVal = h.getValue(row, 'isActive')?.toUpperCase();
+              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES') {
+                const name = h.getValue(row, 'displayName');
+                const details = h.getValue(row, 'accountDetails');
+                if (name) pays.push(`${name}${details ? ` (${details})` : ''}`);
+              }
             }
           }
           if (pays.length > 0) paymentsSummary = pays.join('، ');
@@ -446,12 +476,91 @@ export class HaneenService implements IHaneenService {
           for (let i = 1; i < contactData.length; i++) {
             const row = contactData[i].values;
             if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
-              if (h.getValue(row, 'isActive')?.toUpperCase() === 'TRUE') {
-                cnts.push(`${h.getValue(row, 'channelType')}: ${h.getValue(row, 'contactValue')}`);
+              const activeVal = h.getValue(row, 'isActive')?.toUpperCase();
+              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES') {
+                const channel = h.getValue(row, 'channelType');
+                const val = h.getValue(row, 'contactValue');
+                if (val) cnts.push(`${channel}: ${val}`);
               }
             }
           }
           if (cnts.length > 0) contactsSummary = cnts.join('، ');
+        }
+
+        if (hoursData && hoursData.length > 1) {
+          const h = new HeaderMap(hoursData[0].values, hoursData[0].values);
+          const hrs: string[] = [];
+          for (let i = 1; i < hoursData.length; i++) {
+            const row = hoursData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              const day = h.getValue(row, 'dayOfWeek');
+              const isClosed = h.getValue(row, 'isClosed')?.toUpperCase() === 'TRUE';
+              const is24 = h.getValue(row, 'is24Hours')?.toUpperCase() === 'TRUE';
+              const open = h.getValue(row, 'openingTime');
+              const close = h.getValue(row, 'closingTime');
+              if (isClosed) {
+                hrs.push(`${day}: مغلق`);
+              } else if (is24) {
+                hrs.push(`${day}: مفتوح 24 ساعة`);
+              } else if (open && close) {
+                hrs.push(`${day}: ${open} - ${close}`);
+              }
+            }
+          }
+          if (hrs.length > 0) hoursSummary = hrs.join(' | ');
+        }
+
+        if (delivData && delivData.length > 1) {
+          const h = new HeaderMap(delivData[0].values, delivData[0].values);
+          const delivs: string[] = [];
+          for (let i = 1; i < delivData.length; i++) {
+            const row = delivData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              const isEnabled = h.getValue(row, 'isEnabled')?.toUpperCase() === 'TRUE';
+              const fee = h.getValue(row, 'deliveryFee') || '1000';
+              const areas = h.getValue(row, 'deliveryAreas') || 'جميع مناطق صنعاء';
+              if (isEnabled) {
+                delivs.push(`التوصيل متاح. رسوم التوصيل: ${fee} YER. المناطق: ${areas}`);
+              } else {
+                delivs.push('التوصيل غير متاح حالياً.');
+              }
+            }
+          }
+          if (delivs.length > 0) deliveryInfo = delivs.join('. ');
+        }
+
+        if (locData && locData.length > 1) {
+          const h = new HeaderMap(locData[0].values, locData[0].values);
+          const locs: string[] = [];
+          for (let i = 1; i < locData.length; i++) {
+            const row = locData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              const activeVal = h.getValue(row, 'isActive')?.toUpperCase();
+              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES') {
+                const addr = h.getValue(row, 'address');
+                const name = h.getValue(row, 'name');
+                if (addr) locs.push(`${name ? `${name}: ` : ''}${addr}`);
+              }
+            }
+          }
+          if (locs.length > 0) storeLocation = locs.join('؛ ');
+        }
+
+        if (polData && polData.length > 1) {
+          const h = new HeaderMap(polData[0].values, polData[0].values);
+          const pols: string[] = [];
+          for (let i = 1; i < polData.length; i++) {
+            const row = polData[i].values;
+            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+              const activeVal = h.getValue(row, 'isActive')?.toUpperCase();
+              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES') {
+                const title = h.getValue(row, 'title');
+                const content = h.getValue(row, 'content');
+                if (title && content) pols.push(`${title}: ${content}`);
+              }
+            }
+          }
+          if (pols.length > 0) policiesSummary = pols.join(' | ');
         }
       } catch (err: any) {
         this.logger.warn('Failed to load live Google Sheets data, using default Provider data', { error: err.message });
