@@ -1,7 +1,7 @@
 export const GEMINI_MODELS = {
-  COMPLEX: 'gemini-2.0-flash',
-  GENERAL: 'gemini-2.0-flash',
-  FAST: 'gemini-2.0-flash',
+  COMPLEX: 'gemini-3.6-flash',
+  GENERAL: 'gemini-3.6-flash',
+  FAST: 'gemini-3.6-flash',
 } as const;
 
 export type GeminiModelAlias = 'complex' | 'general' | 'fast' | string;
@@ -20,7 +20,7 @@ export interface GeminiConfig {
 /**
  * Centralized Gemini model normalization helper.
  * Strips outer whitespace, removes single or double 'models/' prefixes required by @google/genai SDK,
- * resolves aliases ('complex', 'general', 'fast'), and maps legacy/unavailable models to active 'gemini-2.0-flash'.
+ * resolves aliases ('complex', 'general', 'fast'), and ensures safe model name pass-through without arbitrary downgrades.
  */
 export function normalizeGeminiModelName(rawModelName?: string): string {
   if (!rawModelName) return GEMINI_MODELS.GENERAL;
@@ -39,16 +39,9 @@ export function normalizeGeminiModelName(rawModelName?: string): string {
   if (lower === 'general' || lower === 'flash') return GEMINI_MODELS.GENERAL;
   if (lower === 'fast' || lower === 'lite') return GEMINI_MODELS.FAST;
 
-  // Map legacy, preview, or unavailable model names to active stable gemini-2.0-flash
-  if (
-    lower.includes('2.5') ||
-    lower.includes('3.1') ||
-    lower.includes('3.5') ||
-    lower.includes('1.5')
-  ) {
-    return GEMINI_MODELS.GENERAL;
-  }
-
+  // No longer applying forced downgrades to older models.
+  // Allow explicit model names like 'gemini-3.6-flash' to pass through safely.
+  
   return cleaned;
 }
 

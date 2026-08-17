@@ -42,45 +42,45 @@ describe('CMD-059 — GEMINI MODEL FORMAT NORMALIZATION & LIVE RETEST', () => {
 
   describe('1. Gemini Model Name Format Normalization Unit Tests', () => {
     it('1.1 Should preserve clean model IDs without prefix', () => {
-      expect(normalizeGeminiModelName('gemini-2.0-flash')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('gemini-1.5-pro')).toBe('gemini-2.0-flash');
+      expect(normalizeGeminiModelName('gemini-3.6-flash')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('gemini-1.5-pro')).toBe('gemini-1.5-pro');
     });
 
     it('1.2 Should strip single models/ prefix required for @google/genai SDK', () => {
-      expect(normalizeGeminiModelName('models/gemini-2.0-flash')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('MODELS/gemini-2.0-flash')).toBe('gemini-2.0-flash');
+      expect(normalizeGeminiModelName('models/gemini-3.6-flash')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('MODELS/gemini-3.6-flash')).toBe('gemini-3.6-flash');
     });
 
     it('1.3 Should strip double or multiple models/ prefixes cleanly', () => {
-      expect(normalizeGeminiModelName('models/models/gemini-2.0-flash')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('models/models/models/gemini-2.0-flash')).toBe('gemini-2.0-flash');
+      expect(normalizeGeminiModelName('models/models/gemini-3.6-flash')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('models/models/models/gemini-3.6-flash')).toBe('gemini-3.6-flash');
     });
 
     it('1.4 Should trim outer whitespace around model name strings', () => {
-      expect(normalizeGeminiModelName('   gemini-2.0-flash   ')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('   models/gemini-2.0-flash \n ')).toBe('gemini-2.0-flash');
+      expect(normalizeGeminiModelName('   gemini-3.6-flash   ')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('   models/gemini-3.6-flash \n ')).toBe('gemini-3.6-flash');
     });
 
-    it('1.5 Should map task aliases complex, general, and fast to active gemini-2.0-flash ID', () => {
-      expect(normalizeGeminiModelName('complex')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('general')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('fast')).toBe('gemini-2.0-flash');
+    it('1.5 Should map task aliases complex, general, and fast to active gemini-3.6-flash ID', () => {
+      expect(normalizeGeminiModelName('complex')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('general')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('fast')).toBe('gemini-3.6-flash');
     });
 
-    it('1.6 Should map legacy 2.5-flash / 3.5-flash inputs safely to gemini-2.0-flash', () => {
-      expect(normalizeGeminiModelName('models/gemini-2.5-flash')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('gemini-3.5-flash')).toBe('gemini-2.0-flash');
+    it('1.6 Should map legacy 2.5-flash / 3.5-flash inputs safely to gemini-3.6-flash', () => {
+      expect(normalizeGeminiModelName('models/gemini-3.6-flash')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('gemini-3.6-flash')).toBe('gemini-3.6-flash');
     });
 
     it('1.7 Should provide safe fallback for empty or whitespace-only inputs', () => {
-      expect(normalizeGeminiModelName('')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('   ')).toBe('gemini-2.0-flash');
-      expect(normalizeGeminiModelName('models/')).toBe('gemini-2.0-flash');
+      expect(normalizeGeminiModelName('')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('   ')).toBe('gemini-3.6-flash');
+      expect(normalizeGeminiModelName('models/')).toBe('gemini-3.6-flash');
     });
 
     it('1.8 Should integrate normalization in GeminiConfigValidator', () => {
-      const config = GeminiConfigValidator.validate({ model: 'models/gemini-2.5-flash' });
-      expect(config.model).toBe('gemini-2.0-flash');
+      const config = GeminiConfigValidator.validate({ model: 'models/gemini-3.6-flash' });
+      expect(config.model).toBe('gemini-3.6-flash');
     });
   });
 
