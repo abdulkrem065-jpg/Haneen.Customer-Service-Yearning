@@ -188,6 +188,66 @@ export async function readbackBusinessKnowledgeEndpoint(req: Request, res: Respo
       }
     }
 
+    // 6. Business Hours Read-Back
+    const bhRows = await transport.getRows('business_hours');
+    let bhCount = 0;
+    if (bhRows.length > 1) {
+      const h = new HeaderMap(bhRows[0].values, bhRows[0].values);
+      for (let i = 1; i < bhRows.length; i++) {
+        if (h.getValue(bhRows[i].values, 'tenantId') === targetTenantId && h.getValue(bhRows[i].values, 'storeId') === targetStoreId) {
+          bhCount++;
+        }
+      }
+    }
+
+    // 7. Delivery Configuration Read-Back
+    const delRows = await transport.getRows('delivery_configuration');
+    let delCount = 0;
+    if (delRows.length > 1) {
+      const h = new HeaderMap(delRows[0].values, delRows[0].values);
+      for (let i = 1; i < delRows.length; i++) {
+        if (h.getValue(delRows[i].values, 'tenantId') === targetTenantId && h.getValue(delRows[i].values, 'storeId') === targetStoreId) {
+          delCount++;
+        }
+      }
+    }
+
+    // 8. Store Locations Read-Back
+    const locRows = await transport.getRows('store_locations');
+    let locCount = 0;
+    if (locRows.length > 1) {
+      const h = new HeaderMap(locRows[0].values, locRows[0].values);
+      for (let i = 1; i < locRows.length; i++) {
+        if (h.getValue(locRows[i].values, 'tenantId') === targetTenantId && h.getValue(locRows[i].values, 'storeId') === targetStoreId) {
+          locCount++;
+        }
+      }
+    }
+
+    // 9. Store Policies Read-Back
+    const polRows = await transport.getRows('store_policies');
+    let polCount = 0;
+    if (polRows.length > 1) {
+      const h = new HeaderMap(polRows[0].values, polRows[0].values);
+      for (let i = 1; i < polRows.length; i++) {
+        if (h.getValue(polRows[i].values, 'tenantId') === targetTenantId && h.getValue(polRows[i].values, 'storeId') === targetStoreId) {
+          polCount++;
+        }
+      }
+    }
+
+    // 10. Digital Services Read-Back
+    const dsRows = await transport.getRows('digital_services');
+    let dsCount = 0;
+    if (dsRows.length > 1) {
+      const h = new HeaderMap(dsRows[0].values, dsRows[0].values);
+      for (let i = 1; i < dsRows.length; i++) {
+        if (h.getValue(dsRows[i].values, 'tenantId') === targetTenantId && h.getValue(dsRows[i].values, 'storeId') === targetStoreId) {
+          dsCount++;
+        }
+      }
+    }
+
     const allPresent = catCount === 10 && prodCount === 31 && pmCount === 6 && cntCount === 2 && ntcCount === 2;
     const verdict = allPresent ? 'APPROVED' : 'PARTIAL';
 
@@ -205,7 +265,12 @@ export async function readbackBusinessKnowledgeEndpoint(req: Request, res: Respo
         products: prodCount,
         paymentMethods: pmCount,
         storeContacts: cntCount,
-        noticesAndBanners: ntcCount
+        noticesAndBanners: ntcCount,
+        businessHours: bhCount,
+        deliveryConfiguration: delCount,
+        storeLocations: locCount,
+        storePolicies: polCount,
+        digitalServices: dsCount
       },
       sampleReadBacks: {
         sugarProduct: sugarProd,
@@ -215,12 +280,6 @@ export async function readbackBusinessKnowledgeEndpoint(req: Request, res: Respo
         phoneContactPresent: phonePresent,
         bannerPresent: bannerTitle,
         smartNoticeContent: smartNoticeContent
-      },
-      deferredSchemas: {
-        digitalServices: 'EMPTY',
-        businessHours: 'EMPTY',
-        deliveryConfiguration: 'EMPTY',
-        storeLocations: 'EMPTY'
       },
       writesPerformed: 0
     });

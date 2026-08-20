@@ -383,7 +383,7 @@ export class HaneenService implements IHaneenService {
     );
   }
 
-  private async getLiveKnowledgePolicy(): Promise<AgentPolicy> {
+  public async getLiveKnowledgePolicy(): Promise<AgentPolicy> {
     const now = Date.now();
     if (this.cachedPolicy && (now - this.cachedPolicy.loadedAt) < 300000) {
       return this.cachedPolicy.policy;
@@ -428,7 +428,9 @@ export class HaneenService implements IHaneenService {
           const cats: string[] = [];
           for (let i = 1; i < catData.length; i++) {
             const row = catData[i].values;
-            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+            const tId = h.getValue(row, 'tenantId') || CANONICAL_TENANT_ID;
+            const sId = h.getValue(row, 'storeId') || CANONICAL_STORE_ID;
+            if (tId === CANONICAL_TENANT_ID && sId === CANONICAL_STORE_ID) {
               const name = h.getValue(row, 'name');
               const desc = h.getValue(row, 'description');
               if (name) cats.push(`- ${name}${desc ? `: ${desc}` : ''}`);
@@ -442,11 +444,14 @@ export class HaneenService implements IHaneenService {
           const prods: string[] = [];
           for (let i = 1; i < prodData.length; i++) {
             const row = prodData[i].values;
-            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
+            const tId = h.getValue(row, 'tenantId') || CANONICAL_TENANT_ID;
+            const sId = h.getValue(row, 'storeId') || CANONICAL_STORE_ID;
+            if (tId === CANONICAL_TENANT_ID && sId === CANONICAL_STORE_ID) {
               const name = h.getValue(row, 'name');
               const price = h.getValue(row, 'price');
-              const stockVal = h.getValue(row, 'inStock')?.toUpperCase();
-              const stock = (stockVal === 'TRUE' || stockVal === '1' || stockVal === 'YES' || h.getValue(row, 'inStock') === 'نعم') ? 'متوفر' : 'غير متوفر';
+              const stockRaw = h.getValue(row, 'inStock') || 'TRUE';
+              const stockVal = stockRaw.trim().toUpperCase();
+              const stock = (stockVal === 'TRUE' || stockVal === '1' || stockVal === 'YES' || stockRaw === 'نعم') ? 'متوفر' : 'غير متوفر';
               if (name && price) prods.push(`- ${name}: ${price} YER (${stock})`);
             }
           }
@@ -458,11 +463,14 @@ export class HaneenService implements IHaneenService {
           const pays: string[] = [];
           for (let i = 1; i < payData.length; i++) {
             const row = payData[i].values;
-            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
-              const activeVal = h.getValue(row, 'isActive')?.toUpperCase();
-              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES') {
-                const name = h.getValue(row, 'displayName');
-                const details = h.getValue(row, 'accountDetails');
+            const tId = h.getValue(row, 'tenantId') || CANONICAL_TENANT_ID;
+            const sId = h.getValue(row, 'storeId') || CANONICAL_STORE_ID;
+            if (tId === CANONICAL_TENANT_ID && sId === CANONICAL_STORE_ID) {
+              const activeRaw = h.getValue(row, 'isActive') || h.getValue(row, 'enabled') || 'TRUE';
+              const activeVal = activeRaw.trim().toUpperCase();
+              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES' || activeRaw === 'نعم') {
+                const name = h.getValue(row, 'displayName') || h.getValue(row, 'name');
+                const details = h.getValue(row, 'accountDetails') || h.getValue(row, 'description');
                 if (name) pays.push(`${name}${details ? ` (${details})` : ''}`);
               }
             }
@@ -475,11 +483,14 @@ export class HaneenService implements IHaneenService {
           const cnts: string[] = [];
           for (let i = 1; i < contactData.length; i++) {
             const row = contactData[i].values;
-            if (h.getValue(row, 'tenantId') === CANONICAL_TENANT_ID && h.getValue(row, 'storeId') === CANONICAL_STORE_ID) {
-              const activeVal = h.getValue(row, 'isActive')?.toUpperCase();
-              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES') {
-                const channel = h.getValue(row, 'channelType');
-                const val = h.getValue(row, 'contactValue');
+            const tId = h.getValue(row, 'tenantId') || CANONICAL_TENANT_ID;
+            const sId = h.getValue(row, 'storeId') || CANONICAL_STORE_ID;
+            if (tId === CANONICAL_TENANT_ID && sId === CANONICAL_STORE_ID) {
+              const activeRaw = h.getValue(row, 'isActive') || h.getValue(row, 'enabled') || 'TRUE';
+              const activeVal = activeRaw.trim().toUpperCase();
+              if (activeVal === 'TRUE' || activeVal === '1' || activeVal === 'YES' || activeRaw === 'نعم') {
+                const channel = h.getValue(row, 'channelType') || h.getValue(row, 'type') || 'Contact';
+                const val = h.getValue(row, 'contactValue') || h.getValue(row, 'value');
                 if (val) cnts.push(`${channel}: ${val}`);
               }
             }

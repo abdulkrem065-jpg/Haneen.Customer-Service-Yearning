@@ -1,5 +1,6 @@
 import { ISheetMapper, parseBoolean, formatBoolean } from './mapper';
 import { HeaderMap } from './header-map';
+import { generateAutoId } from './validation-and-autoid';
 import {
   PaymentMethod,
   StoreContact,
@@ -23,16 +24,17 @@ export class PaymentMethodMapper implements ISheetMapper<PaymentMethod> {
   defaultHeaders = [...CanonicalSchemas.payment_methods.requiredHeaders, ...CanonicalSchemas.payment_methods.optionalHeaders];
 
   fromRow(rowValues: string[], headerMap: HeaderMap): PaymentMethod {
-    const id = headerMap.requireValue(rowValues, 'id');
-    const tenantId = headerMap.requireValue(rowValues, 'tenantId');
-    const storeId = headerMap.requireValue(rowValues, 'storeId');
-    const methodType = headerMap.requireValue(rowValues, 'methodType');
-    const displayName = headerMap.requireValue(rowValues, 'displayName');
+    const displayName = headerMap.getValue(rowValues, 'displayName') || headerMap.getValue(rowValues, 'name') || 'طريقة دفع';
+    const rawId = headerMap.getValue(rowValues, 'id');
+    const id = rawId && rawId.trim() ? rawId.trim() : generateAutoId('pay', displayName);
+    const tenantId = headerMap.getValue(rowValues, 'tenantId') || 'tnt-41f0d530';
+    const storeId = headerMap.getValue(rowValues, 'storeId') || 'str-2c6ad81f';
+    const methodType = headerMap.getValue(rowValues, 'methodType') || headerMap.getValue(rowValues, 'type') || 'wallet';
     const accountDetails = headerMap.getValue(rowValues, 'accountDetails') || '';
-    const isActiveStr = headerMap.requireValue(rowValues, 'isActive');
-    const displayOrderStr = headerMap.requireValue(rowValues, 'displayOrder');
-    const createdAtStr = headerMap.requireValue(rowValues, 'createdAt');
-    const updatedAtStr = headerMap.requireValue(rowValues, 'updatedAt');
+    const isActiveStr = headerMap.getValue(rowValues, 'isActive') || headerMap.getValue(rowValues, 'enabled') || 'TRUE';
+    const displayOrderStr = headerMap.getValue(rowValues, 'displayOrder') || '1';
+    const createdAtStr = headerMap.getValue(rowValues, 'createdAt') || new Date().toISOString();
+    const updatedAtStr = headerMap.getValue(rowValues, 'updatedAt') || new Date().toISOString();
 
     return {
       id,
@@ -74,15 +76,16 @@ export class StoreContactMapper implements ISheetMapper<StoreContact> {
   defaultHeaders = [...CanonicalSchemas.store_contacts.requiredHeaders, ...CanonicalSchemas.store_contacts.optionalHeaders];
 
   fromRow(rowValues: string[], headerMap: HeaderMap): StoreContact {
-    const id = headerMap.requireValue(rowValues, 'id');
-    const tenantId = headerMap.requireValue(rowValues, 'tenantId');
-    const storeId = headerMap.requireValue(rowValues, 'storeId');
-    const channelType = headerMap.requireValue(rowValues, 'channelType');
-    const contactValue = headerMap.requireValue(rowValues, 'contactValue');
-    const isActiveStr = headerMap.requireValue(rowValues, 'isActive');
-    const displayOrderStr = headerMap.requireValue(rowValues, 'displayOrder');
-    const createdAtStr = headerMap.requireValue(rowValues, 'createdAt');
-    const updatedAtStr = headerMap.requireValue(rowValues, 'updatedAt');
+    const channelType = headerMap.getValue(rowValues, 'channelType') || headerMap.getValue(rowValues, 'type') || 'whatsapp';
+    const contactValue = headerMap.getValue(rowValues, 'contactValue') || headerMap.getValue(rowValues, 'value') || '';
+    const rawId = headerMap.getValue(rowValues, 'id');
+    const id = rawId && rawId.trim() ? rawId.trim() : generateAutoId('cnt', channelType);
+    const tenantId = headerMap.getValue(rowValues, 'tenantId') || 'tnt-41f0d530';
+    const storeId = headerMap.getValue(rowValues, 'storeId') || 'str-2c6ad81f';
+    const isActiveStr = headerMap.getValue(rowValues, 'isActive') || headerMap.getValue(rowValues, 'enabled') || 'TRUE';
+    const displayOrderStr = headerMap.getValue(rowValues, 'displayOrder') || '1';
+    const createdAtStr = headerMap.getValue(rowValues, 'createdAt') || new Date().toISOString();
+    const updatedAtStr = headerMap.getValue(rowValues, 'updatedAt') || new Date().toISOString();
 
     return {
       id,
@@ -635,10 +638,11 @@ export class CategoryMapper implements ISheetMapper<Category> {
   defaultHeaders = [...CanonicalSchemas.categories.requiredHeaders, ...CanonicalSchemas.categories.optionalHeaders];
 
   fromRow(rowValues: string[], headerMap: HeaderMap): Category {
-    const id = headerMap.requireValue(rowValues, 'id');
-    const tenantId = headerMap.requireValue(rowValues, 'tenantId');
-    const storeId = headerMap.requireValue(rowValues, 'storeId');
-    const name = headerMap.requireValue(rowValues, 'name');
+    const name = headerMap.getValue(rowValues, 'name') || 'تصنيف جديد';
+    const rawId = headerMap.getValue(rowValues, 'id');
+    const id = rawId && rawId.trim() ? rawId.trim() : generateAutoId('cat', name);
+    const tenantId = headerMap.getValue(rowValues, 'tenantId') || 'tnt-41f0d530';
+    const storeId = headerMap.getValue(rowValues, 'storeId') || 'str-2c6ad81f';
     const description = headerMap.getValue(rowValues, 'description') || '';
 
     return {
@@ -671,12 +675,14 @@ export class ProductMapper implements ISheetMapper<Product> {
   defaultHeaders = [...CanonicalSchemas.products.requiredHeaders, ...CanonicalSchemas.products.optionalHeaders];
 
   fromRow(rowValues: string[], headerMap: HeaderMap): Product {
-    const id = headerMap.requireValue(rowValues, 'id');
-    const tenantId = headerMap.requireValue(rowValues, 'tenantId');
-    const storeId = headerMap.requireValue(rowValues, 'storeId');
-    const name = headerMap.requireValue(rowValues, 'name');
-    const priceStr = headerMap.requireValue(rowValues, 'price');
-    const currency = headerMap.getValue(rowValues, 'currency') || 'YER';
+    const name = headerMap.getValue(rowValues, 'name') || 'منتج جديد';
+    const rawId = headerMap.getValue(rowValues, 'id');
+    const id = rawId && rawId.trim() ? rawId.trim() : generateAutoId('prod', name);
+    const tenantId = headerMap.getValue(rowValues, 'tenantId') || 'tnt-41f0d530';
+    const storeId = headerMap.getValue(rowValues, 'storeId') || 'str-2c6ad81f';
+    const priceStr = headerMap.getValue(rowValues, 'price') || '0';
+    const currencyRaw = headerMap.getValue(rowValues, 'currency') || 'YER';
+    const currency = ['YER', 'SAR', 'USD'].includes(currencyRaw.trim().toUpperCase()) ? currencyRaw.trim().toUpperCase() : 'YER';
     const inStockStr = headerMap.getValue(rowValues, 'inStock') || 'true';
     const description = headerMap.getValue(rowValues, 'description') || '';
     const categoryId = headerMap.getValue(rowValues, 'categoryId') || '';
