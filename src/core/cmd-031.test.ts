@@ -182,9 +182,9 @@ describe('CMD-031: Real Business Knowledge Provisioning Verification', () => {
     expect(transport.sheetsData['order_items'].length).toBe(0);
     expect(transport.sheetsData['conversations'].length).toBe(0);
 
-    // Deferred sheets must be untouched
-    expect(transport.sheetsData['business_hours'].length).toBe(0);
-    expect(transport.sheetsData['delivery_configuration'].length).toBe(0);
-    expect(transport.sheetsData['store_locations'].length).toBe(0);
+    // Store knowledge tables provisioned in CMD-068
+    expect(transport.sheetsData['business_hours'].length).toBeGreaterThan(0);
+    expect(transport.sheetsData['delivery_configuration'].length).toBeGreaterThan(0);
+    expect(transport.sheetsData['store_locations'].length).toBeGreaterThan(0);
   });
 });

@@ -116,6 +116,58 @@ export const REAL_STORE_NOTICES: StoreNoticeInput[] = [
   },
 ];
 
+export const REAL_BUSINESS_HOURS = [
+  { id: 'bh-001', dayOfWeek: 'الأحد', openingTime: '08:00', closingTime: '22:00', isClosed: false, is24Hours: false },
+  { id: 'bh-002', dayOfWeek: 'الإثنين', openingTime: '08:00', closingTime: '22:00', isClosed: false, is24Hours: false },
+  { id: 'bh-003', dayOfWeek: 'الثلاثاء', openingTime: '08:00', closingTime: '22:00', isClosed: false, is24Hours: false },
+  { id: 'bh-004', dayOfWeek: 'الأربعاء', openingTime: '08:00', closingTime: '22:00', isClosed: false, is24Hours: false },
+  { id: 'bh-005', dayOfWeek: 'الخميس', openingTime: '08:00', closingTime: '22:00', isClosed: false, is24Hours: false },
+  { id: 'bh-006', dayOfWeek: 'الجمعة', openingTime: '14:00', closingTime: '23:00', isClosed: false, is24Hours: false },
+  { id: 'bh-007', dayOfWeek: 'السبت', openingTime: '14:00', closingTime: '23:00', isClosed: false, is24Hours: false },
+];
+
+export const REAL_DELIVERY_CONFIG = {
+  id: 'del-001',
+  isEnabled: true,
+  deliveryFee: '1000',
+  currency: 'YER',
+  deliveryAreas: 'أمانة العاصمة صنعاء - جميع المناطق المعتمدة',
+};
+
+export const REAL_STORE_LOCATION = {
+  id: 'loc-001',
+  name: 'متجر الذيباني الرئيسي',
+  address: 'صنعاء - شارع الثلاثين - متجر الذيباني',
+  isActive: true,
+};
+
+export const REAL_STORE_POLICIES = [
+  {
+    id: 'pol-001',
+    policyType: 'return',
+    title: 'سياسة الاسترجاع والاستبدال',
+    content: 'يمكن استبدال أو استرجاع البضائع خلال 3 أيام بشرط حالتها الأصلية وعدم فتح الغلاف.',
+    isActive: true,
+  },
+];
+
+export const REAL_DIGITAL_SERVICES = [
+  {
+    id: 'ds-001',
+    name: 'شحن فورجي',
+    serviceType: 'telecom',
+    description: 'تسديد وباقات يمن فورجي ويمن موبايل بأفضل الأسعار',
+    isActive: true,
+  },
+  {
+    id: 'ds-002',
+    name: 'كروت ترفيه وبوبجي',
+    serviceType: 'gaming',
+    description: 'شحن شدات بوبجي وبطاقات الترفيه الرقمية',
+    isActive: true,
+  },
+];
+
 export interface BusinessKnowledgeProvisionResult {
   tenantId: string;
   storeId: string;
@@ -350,7 +402,151 @@ export class BusinessKnowledgeProvisioner {
       existingNtcKeys.add(ntc.title);
     }
 
-    // 5. Post-Write Read-Back Verification for Payment Methods, Contacts, and Notices
+    // 5. Provision Business Hours
+    const bhSchema = CanonicalSchemas.business_hours;
+    const bhHeaders = [...bhSchema.requiredHeaders, ...bhSchema.optionalHeaders];
+    const bhRows = await this.transport.getRows(bhSchema.sheetName);
+    if (bhRows.length === 0) {
+      const bhHeaderMap = new HeaderMap(bhHeaders, bhHeaders);
+      if (this.transport.writeHeaderRow) {
+        await this.transport.writeHeaderRow(bhSchema.sheetName, bhHeaders);
+      } else {
+        await this.transport.addRow(bhSchema.sheetName, bhHeaders);
+      }
+      for (const bh of REAL_BUSINESS_HOURS) {
+        const row = bhHeaderMap.buildRow({
+          id: bh.id,
+          tenantId,
+          storeId,
+          dayOfWeek: bh.dayOfWeek,
+          openingTime: bh.openingTime,
+          closingTime: bh.closingTime,
+          isClosed: bh.isClosed ? 'TRUE' : 'FALSE',
+          is24Hours: bh.is24Hours ? 'TRUE' : 'FALSE',
+          createdAt: now,
+          updatedAt: now,
+        });
+        await this.transport.addRow(bhSchema.sheetName, row);
+      }
+      result.businessHoursStatus = 'PROVISIONED';
+    } else {
+      result.businessHoursStatus = 'EXISTS';
+    }
+
+    // 6. Provision Delivery Configuration
+    const delSchema = CanonicalSchemas.delivery_configuration;
+    const delHeaders = [...delSchema.requiredHeaders, ...delSchema.optionalHeaders];
+    const delRows = await this.transport.getRows(delSchema.sheetName);
+    if (delRows.length === 0) {
+      const delHeaderMap = new HeaderMap(delHeaders, delHeaders);
+      if (this.transport.writeHeaderRow) {
+        await this.transport.writeHeaderRow(delSchema.sheetName, delHeaders);
+      } else {
+        await this.transport.addRow(delSchema.sheetName, delHeaders);
+      }
+      const row = delHeaderMap.buildRow({
+        id: REAL_DELIVERY_CONFIG.id,
+        tenantId,
+        storeId,
+        isEnabled: REAL_DELIVERY_CONFIG.isEnabled ? 'TRUE' : 'FALSE',
+        deliveryFee: REAL_DELIVERY_CONFIG.deliveryFee,
+        currency: REAL_DELIVERY_CONFIG.currency,
+        deliveryAreas: REAL_DELIVERY_CONFIG.deliveryAreas,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await this.transport.addRow(delSchema.sheetName, row);
+      result.deliveryConfigurationStatus = 'PROVISIONED';
+    } else {
+      result.deliveryConfigurationStatus = 'EXISTS';
+    }
+
+    // 7. Provision Store Location
+    const locSchema = CanonicalSchemas.store_locations;
+    const locHeaders = [...locSchema.requiredHeaders, ...locSchema.optionalHeaders];
+    const locRows = await this.transport.getRows(locSchema.sheetName);
+    if (locRows.length === 0) {
+      const locHeaderMap = new HeaderMap(locHeaders, locHeaders);
+      if (this.transport.writeHeaderRow) {
+        await this.transport.writeHeaderRow(locSchema.sheetName, locHeaders);
+      } else {
+        await this.transport.addRow(locSchema.sheetName, locHeaders);
+      }
+      const row = locHeaderMap.buildRow({
+        id: REAL_STORE_LOCATION.id,
+        tenantId,
+        storeId,
+        name: REAL_STORE_LOCATION.name,
+        address: REAL_STORE_LOCATION.address,
+        isActive: REAL_STORE_LOCATION.isActive ? 'TRUE' : 'FALSE',
+        createdAt: now,
+        updatedAt: now,
+      });
+      await this.transport.addRow(locSchema.sheetName, row);
+      result.storeLocationsStatus = 'PROVISIONED';
+    } else {
+      result.storeLocationsStatus = 'EXISTS';
+    }
+
+    // 8. Provision Store Policies
+    const polSchema = CanonicalSchemas.store_policies;
+    const polHeaders = [...polSchema.requiredHeaders, ...polSchema.optionalHeaders];
+    const polRows = await this.transport.getRows(polSchema.sheetName);
+    if (polRows.length === 0) {
+      const polHeaderMap = new HeaderMap(polHeaders, polHeaders);
+      if (this.transport.writeHeaderRow) {
+        await this.transport.writeHeaderRow(polSchema.sheetName, polHeaders);
+      } else {
+        await this.transport.addRow(polSchema.sheetName, polHeaders);
+      }
+      for (const pol of REAL_STORE_POLICIES) {
+        const row = polHeaderMap.buildRow({
+          id: pol.id,
+          tenantId,
+          storeId,
+          policyType: pol.policyType,
+          title: pol.title,
+          content: pol.content,
+          isActive: pol.isActive ? 'TRUE' : 'FALSE',
+          createdAt: now,
+          updatedAt: now,
+        });
+        await this.transport.addRow(polSchema.sheetName, row);
+      }
+    }
+
+    // 9. Provision Digital Services
+    const dsSchema = CanonicalSchemas.digital_services;
+    const dsHeaders = [...dsSchema.requiredHeaders, ...dsSchema.optionalHeaders];
+    const dsRows = await this.transport.getRows(dsSchema.sheetName);
+    if (dsRows.length === 0) {
+      const dsHeaderMap = new HeaderMap(dsHeaders, dsHeaders);
+      if (this.transport.writeHeaderRow) {
+        await this.transport.writeHeaderRow(dsSchema.sheetName, dsHeaders);
+      } else {
+        await this.transport.addRow(dsSchema.sheetName, dsHeaders);
+      }
+      for (const ds of REAL_DIGITAL_SERVICES) {
+        const row = dsHeaderMap.buildRow({
+          id: ds.id,
+          tenantId,
+          storeId,
+          name: ds.name,
+          serviceType: ds.serviceType,
+          description: ds.description,
+          isActive: ds.isActive ? 'TRUE' : 'FALSE',
+          displayOrder: '1',
+          createdAt: now,
+          updatedAt: now,
+        });
+        await this.transport.addRow(dsSchema.sheetName, row);
+      }
+      result.digitalServicesStatus = 'PROVISIONED';
+    } else {
+      result.digitalServicesStatus = 'EXISTS';
+    }
+
+    // 10. Post-Write Read-Back Verification for Payment Methods, Contacts, and Notices
     const readBackPm = await this.transport.getRows(pmSchema.sheetName);
     let countPm = 0;
     if (readBackPm.length > 0) {
