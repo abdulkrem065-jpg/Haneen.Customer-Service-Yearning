@@ -45,4 +45,27 @@ export class MockGoogleSheetsTransport implements IGoogleSheetsTransport {
     }
     rows.splice(rowIndex, 1);
   }
+
+  async createSheet(sheetName: string): Promise<void> {
+    this.initSheet(sheetName);
+  }
+
+  async ensureSheetExists(sheetName: string): Promise<boolean> {
+    if (!this.sheets.has(sheetName)) {
+      this.initSheet(sheetName);
+      return true;
+    }
+    return false;
+  }
+
+  async writeHeaderRow(sheetName: string, headers: string[]): Promise<void> {
+    this.initSheet(sheetName);
+    const rows = this.sheets.get(sheetName)!;
+    if (rows.length === 0) {
+      rows.push({ rowNumber: 1, values: [...headers] });
+      this.nextRowNumber.set(sheetName, 2);
+    } else {
+      rows[0] = { rowNumber: 1, values: [...headers] };
+    }
+  }
 }

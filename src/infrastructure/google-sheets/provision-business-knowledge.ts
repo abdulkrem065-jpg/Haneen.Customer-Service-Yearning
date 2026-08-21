@@ -151,6 +151,18 @@ export const REAL_STORE_POLICIES = [
   },
 ];
 
+export const REAL_DELIVERY_ZONES = [
+  {
+    id: 'dz-001',
+    name: 'أمانة العاصمة صنعاء',
+    deliveryFee: '1000',
+    currency: 'YER',
+    estimatedDeliveryMinutes: '60',
+    isActive: true,
+    displayOrder: 1,
+  },
+];
+
 export const REAL_DIGITAL_SERVICES = [
   {
     id: 'ds-001',
@@ -185,7 +197,9 @@ export interface BusinessKnowledgeProvisionResult {
   digitalServicesStatus: string;
   businessHoursStatus: string;
   deliveryConfigurationStatus: string;
+  deliveryZonesStatus: string;
   storeLocationsStatus: string;
+  storePoliciesStatus: string;
   totalCategoriesReadBack: number;
   totalProductsReadBack: number;
   totalPaymentMethodsReadBack: number;
@@ -221,7 +235,9 @@ export class BusinessKnowledgeProvisioner {
       digitalServicesStatus: 'EMPTY / READY_FOR_REAL_DATA',
       businessHoursStatus: 'EMPTY',
       deliveryConfigurationStatus: 'EMPTY',
+      deliveryZonesStatus: 'EMPTY',
       storeLocationsStatus: 'EMPTY',
+      storePoliciesStatus: 'EMPTY',
       totalCategoriesReadBack: 0,
       totalProductsReadBack: 0,
       totalPaymentMethodsReadBack: 0,
@@ -513,6 +529,41 @@ export class BusinessKnowledgeProvisioner {
         });
         await this.transport.addRow(polSchema.sheetName, row);
       }
+      result.storePoliciesStatus = 'PROVISIONED';
+    } else {
+      result.storePoliciesStatus = 'EXISTS';
+    }
+
+    // 8.5. Provision Delivery Zones
+    const dzSchema = CanonicalSchemas.delivery_zones;
+    const dzHeaders = [...dzSchema.requiredHeaders, ...dzSchema.optionalHeaders];
+    const dzRows = await this.transport.getRows(dzSchema.sheetName);
+    if (dzRows.length === 0) {
+      const dzHeaderMap = new HeaderMap(dzHeaders, dzHeaders);
+      if (this.transport.writeHeaderRow) {
+        await this.transport.writeHeaderRow(dzSchema.sheetName, dzHeaders);
+      } else {
+        await this.transport.addRow(dzSchema.sheetName, dzHeaders);
+      }
+      for (const dz of REAL_DELIVERY_ZONES) {
+        const row = dzHeaderMap.buildRow({
+          id: dz.id,
+          tenantId,
+          storeId,
+          name: dz.name,
+          deliveryFee: dz.deliveryFee,
+          currency: dz.currency,
+          estimatedDeliveryMinutes: dz.estimatedDeliveryMinutes,
+          isActive: dz.isActive ? 'TRUE' : 'FALSE',
+          displayOrder: dz.displayOrder.toString(),
+          createdAt: now,
+          updatedAt: now,
+        });
+        await this.transport.addRow(dzSchema.sheetName, row);
+      }
+      result.deliveryZonesStatus = 'PROVISIONED';
+    } else {
+      result.deliveryZonesStatus = 'EXISTS';
     }
 
     // 9. Provision Digital Services

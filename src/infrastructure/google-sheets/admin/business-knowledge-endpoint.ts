@@ -248,6 +248,18 @@ export async function readbackBusinessKnowledgeEndpoint(req: Request, res: Respo
       }
     }
 
+    // 11. Delivery Zones Read-Back
+    const dzRows = await transport.getRows('delivery_zones');
+    let dzCount = 0;
+    if (dzRows.length > 1) {
+      const h = new HeaderMap(dzRows[0].values, dzRows[0].values);
+      for (let i = 1; i < dzRows.length; i++) {
+        if (h.getValue(dzRows[i].values, 'tenantId') === targetTenantId && h.getValue(dzRows[i].values, 'storeId') === targetStoreId) {
+          dzCount++;
+        }
+      }
+    }
+
     const allPresent = catCount === 10 && prodCount === 31 && pmCount === 6 && cntCount === 2 && ntcCount === 2;
     const verdict = allPresent ? 'APPROVED' : 'PARTIAL';
 
@@ -268,6 +280,7 @@ export async function readbackBusinessKnowledgeEndpoint(req: Request, res: Respo
         noticesAndBanners: ntcCount,
         businessHours: bhCount,
         deliveryConfiguration: delCount,
+        deliveryZones: dzCount,
         storeLocations: locCount,
         storePolicies: polCount,
         digitalServices: dsCount

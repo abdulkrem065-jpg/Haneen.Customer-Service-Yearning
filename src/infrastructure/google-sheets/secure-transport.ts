@@ -96,6 +96,7 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
   }
 
   async addRow(sheetName: string, values: string[]): Promise<SheetRow> {
+    await this.ensureSheetExists(sheetName);
     try {
       const api = await this.getSheetsAPI();
       const response = await api.spreadsheets.values.append({
@@ -120,6 +121,7 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
   }
 
   async updateRow(sheetName: string, rowNumber: number, values: string[]): Promise<void> {
+    await this.ensureSheetExists(sheetName);
     try {
       const api = await this.getSheetsAPI();
       await api.spreadsheets.values.update({
@@ -168,6 +170,11 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
   }
 
   async createSheet(sheetName: string): Promise<void> {
+    const exists = await this.hasSheet(sheetName);
+    if (exists) {
+      return;
+    }
+
     try {
       const api = await this.getSheetsAPI();
       await api.spreadsheets.batchUpdate({
@@ -184,12 +191,30 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
           ],
         },
       });
+      // Invalidate metadata cache so subsequent calls reflect newly created sheet
+      this.cachedMetadata = null;
+      this.metadataCachedAt = 0;
     } catch (error: any) {
+      if (error?.message?.includes('already exists') || error?.data?.error?.message?.includes('already exists')) {
+        this.cachedMetadata = null;
+        this.metadataCachedAt = 0;
+        return;
+      }
       this.handleApiError(error);
     }
   }
 
+  async ensureSheetExists(sheetName: string): Promise<boolean> {
+    const exists = await this.hasSheet(sheetName);
+    if (exists) {
+      return false;
+    }
+    await this.createSheet(sheetName);
+    return true;
+  }
+
   async writeHeaderRow(sheetName: string, headers: string[]): Promise<void> {
+    await this.ensureSheetExists(sheetName);
     try {
       const api = await this.getSheetsAPI();
       await api.spreadsheets.values.update({

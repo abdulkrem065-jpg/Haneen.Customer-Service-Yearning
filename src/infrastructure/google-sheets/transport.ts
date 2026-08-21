@@ -9,4 +9,6 @@ export interface IGoogleSheetsTransport {
   updateRow(sheetName: string, rowNumber: number, values: string[]): Promise<void>;
   deleteRow(sheetName: string, rowNumber: number): Promise<void>;
   writeHeaderRow?(sheetName: string, headers: string[]): Promise<void>;
+  createSheet?(sheetName: string): Promise<void>;
+  ensureSheetExists?(sheetName: string): Promise<boolean>;
 }
