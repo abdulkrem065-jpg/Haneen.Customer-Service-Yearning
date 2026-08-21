@@ -51,6 +51,28 @@ export class HeaderMap {
     if (index === undefined) return undefined;
     return rowValues[index];
   }
+
+  getIndex(headerName: string): number | undefined {
+    let index = this.colIndexMap.get(headerName);
+    if (index === undefined && this.aliases[headerName]) {
+      for (const alias of this.aliases[headerName]) {
+        index = this.colIndexMap.get(alias);
+        if (index !== undefined) break;
+      }
+    }
+    return index;
+  }
+
+  setValue(rowValues: string[], headerName: string, value: string): boolean {
+    const index = this.getIndex(headerName);
+    if (index === undefined) return false;
+    while (rowValues.length <= index) {
+      rowValues.push('');
+    }
+    rowValues[index] = value;
+    return true;
+  }
+
   
   requireValue(rowValues: string[], headerName: string): string {
     const val = this.getValue(rowValues, headerName);

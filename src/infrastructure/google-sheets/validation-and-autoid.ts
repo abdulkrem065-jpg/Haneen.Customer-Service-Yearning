@@ -18,7 +18,8 @@ export const VALIDATION_RULES: Record<string, ValidationRule[]> = {
   categories: [
     { field: 'id', type: 'AUTO_ID', defaultValue: 'cat-001' },
     { field: 'tenantId', type: 'REQUIRED_STRING', defaultValue: 'tnt-41f0d530' },
-    { field: 'storeId', type: 'REQUIRED_STRING', defaultValue: 'str-2c6ad81f' }
+    { field: 'storeId', type: 'REQUIRED_STRING', defaultValue: 'str-2c6ad81f' },
+    { field: 'isActive', type: 'BOOLEAN', options: ['TRUE', 'FALSE'], defaultValue: 'TRUE' }
   ],
   payment_methods: [
     { field: 'id', type: 'AUTO_ID', defaultValue: 'pay-001' },
@@ -35,6 +36,28 @@ export const VALIDATION_RULES: Record<string, ValidationRule[]> = {
     { field: 'isActive', type: 'BOOLEAN', options: ['TRUE', 'FALSE'], defaultValue: 'TRUE' }
   ]
 };
+
+
+export function generateSequentialAutoId(prefix: string, existingIds: string[]): string {
+  let maxSeq = 0;
+  // Match prefix-NNN or prefix-N
+  const regex = new RegExp(`^${prefix}-(\\d+)$`, 'i');
+
+  for (const rawId of existingIds) {
+    if (!rawId) continue;
+    const trimmed = rawId.trim();
+    const match = trimmed.match(regex);
+    if (match && match[1]) {
+      const seq = parseInt(match[1], 10);
+      if (!isNaN(seq) && seq > maxSeq) {
+        maxSeq = seq;
+      }
+    }
+  }
+
+  const nextSeq = maxSeq + 1;
+  return `${prefix}-${nextSeq.toString().padStart(3, '0')}`;
+}
 
 export function generateAutoId(prefix: string, seed?: string, sequenceNumber?: number): string {
   if (sequenceNumber !== undefined && sequenceNumber > 0) {
@@ -66,27 +89,26 @@ export function validateAndCleanValue(
   switch (rule.type) {
     case 'BOOLEAN': {
       const upper = trimmed.toUpperCase();
-      if (upper === 'TRUE' || upper === '1' || upper === 'YES' || trimmed === 'نعم') {
+      if (upper === 'TRUE' || upper === '1' || upper === 'YES' || trimmed === 'نعم' || trimmed === 'متوفر') {
         return 'TRUE';
       }
-      if (upper === 'FALSE' || upper === '0' || upper === 'NO' || trimmed === 'لا') {
+      if (upper === 'FALSE' || upper === '0' || upper === 'NO' || trimmed === 'لا' || trimmed === 'غير متوفر') {
         return 'FALSE';
       }
       return rule.defaultValue || 'TRUE';
     }
     case 'NUMERIC': {
       const num = parseFloat(trimmed);
-      if (isNaN(num)) {
+      if (isNaN(num) || num < 0) {
         return rule.defaultValue || '0';
       }
       return num.toString();
     }
     case 'DROPDOWN': {
-      if (rule.options && rule.options.includes(trimmed)) {
-        return trimmed;
-      }
-      // Case-insensitive fallback
       if (rule.options) {
+        if (rule.options.includes(trimmed)) {
+          return trimmed;
+        }
         const match = rule.options.find(o => o.toLowerCase() === trimmed.toLowerCase());
         if (match) return match;
       }
@@ -104,3 +126,4 @@ export function validateAndCleanValue(
       return trimmed;
   }
 }
+

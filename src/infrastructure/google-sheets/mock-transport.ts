@@ -68,4 +68,24 @@ export class MockGoogleSheetsTransport implements IGoogleSheetsTransport {
       rows[0] = { rowNumber: 1, values: [...headers] };
     }
   }
+
+  private validations: Map<string, Array<{ col: number; options: string[] }>> = new Map();
+
+  async applyDataValidation(sheetName: string, columnIndex: number, options: string[]): Promise<void> {
+    this.initSheet(sheetName);
+    if (!this.validations.has(sheetName)) {
+      this.validations.set(sheetName, []);
+    }
+    const list = this.validations.get(sheetName)!;
+    const existingIdx = list.findIndex(v => v.col === columnIndex);
+    if (existingIdx >= 0) {
+      list[existingIdx].options = [...options];
+    } else {
+      list.push({ col: columnIndex, options: [...options] });
+    }
+  }
+
+  getValidations(sheetName: string): Array<{ col: number; options: string[] }> {
+    return this.validations.get(sheetName) || [];
+  }
 }

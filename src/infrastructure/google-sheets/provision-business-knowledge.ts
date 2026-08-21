@@ -2,6 +2,7 @@ import { IGoogleSheetsTransport } from './transport';
 import { CanonicalSchemas } from './schema-definitions';
 import { HeaderMap } from './header-map';
 import { CatalogImporter, ALTHEIBANI_TENANT_ID, ALTHEIBANI_STORE_ID, ALTHEIBANI_CURRENCY } from './import-altheibani-catalog';
+import { GoogleSheetsAdminReconciler } from './admin-reconciler';
 
 export interface PaymentMethodInput {
   id: string;
@@ -634,6 +635,11 @@ export class BusinessKnowledgeProvisioner {
     }
     result.totalNoticesReadBack = countNtc;
 
+    // 11. Run Auto-Fields Reconciliation & Data Validations
+    const reconciler = new GoogleSheetsAdminReconciler(this.transport);
+    await reconciler.reconcileAll();
+
     return result;
   }
 }
+

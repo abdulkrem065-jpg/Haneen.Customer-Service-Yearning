@@ -11,4 +11,5 @@ export interface IGoogleSheetsTransport {
   writeHeaderRow?(sheetName: string, headers: string[]): Promise<void>;
   createSheet?(sheetName: string): Promise<void>;
   ensureSheetExists?(sheetName: string): Promise<boolean>;
+  applyDataValidation?(sheetName: string, columnIndex: number, options: string[]): Promise<void>;
 }

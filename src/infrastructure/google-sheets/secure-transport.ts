@@ -230,6 +230,48 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
     }
   }
 
+  async applyDataValidation(sheetName: string, columnIndex: number, options: string[]): Promise<void> {
+    await this.ensureSheetExists(sheetName);
+    try {
+      const api = await this.getSheetsAPI();
+      const metadata = await this.getSpreadsheetMetadata();
+      const sheet = metadata.sheets?.find((s: any) => s.properties?.title === sheetName);
+      if (!sheet || sheet.properties?.sheetId === undefined || sheet.properties?.sheetId === null) {
+        return;
+      }
+      const sheetId = sheet.properties.sheetId;
+
+      await api.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              setDataValidation: {
+                range: {
+                  sheetId,
+                  startRowIndex: 1, // Row 2 onwards (skip header)
+                  endRowIndex: 1000,
+                  startColumnIndex: columnIndex,
+                  endColumnIndex: columnIndex + 1,
+                },
+                rule: {
+                  condition: {
+                    type: 'ONE_OF_LIST',
+                    values: options.map(opt => ({ userEnteredValue: opt })),
+                  },
+                  showCustomUi: true,
+                  strict: true,
+                },
+              },
+            },
+          ],
+        },
+      });
+    } catch (error: any) {
+      console.warn(`[SecureTransport] Data validation application warning for ${sheetName} col ${columnIndex}:`, error.message);
+    }
+  }
+
   private handleApiError(error: any): never {
     if (error.code === 404 || error.status === 404) {
       throw new ProviderError(`Spreadsheet not found or inaccessible.`);
