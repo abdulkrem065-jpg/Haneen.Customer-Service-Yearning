@@ -272,6 +272,52 @@ export class SecureGoogleSheetsTransport implements IGoogleSheetsTransport {
     }
   }
 
+  async applyNumberValidation(sheetName: string, columnIndex: number, minVal: number = 0, isInteger: boolean = false): Promise<void> {
+    await this.ensureSheetExists(sheetName);
+    try {
+      const api = await this.getSheetsAPI();
+      const metadata = await this.getSpreadsheetMetadata();
+      const sheet = metadata.sheets?.find((s: any) => s.properties?.title === sheetName);
+      if (!sheet || sheet.properties?.sheetId === undefined || sheet.properties?.sheetId === null) {
+        return;
+      }
+      const sheetId = sheet.properties.sheetId;
+
+      const conditionType = isInteger ? 'NUMBER_BETWEEN' : 'NUMBER_GREATER_THAN_EQ';
+      const conditionValues = isInteger
+        ? [{ userEnteredValue: minVal.toString() }, { userEnteredValue: '1000000000' }]
+        : [{ userEnteredValue: minVal.toString() }];
+
+      await api.spreadsheets.batchUpdate({
+        spreadsheetId: this.spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              setDataValidation: {
+                range: {
+                  sheetId,
+                  startRowIndex: 1,
+                  endRowIndex: 1000,
+                  startColumnIndex: columnIndex,
+                  endColumnIndex: columnIndex + 1,
+                },
+                rule: {
+                  condition: {
+                    type: conditionType,
+                    values: conditionValues,
+                  },
+                  strict: true,
+                },
+              },
+            },
+          ],
+        },
+      });
+    } catch (error: any) {
+      console.warn(`[SecureTransport] Number validation warning for ${sheetName} col ${columnIndex}:`, error.message);
+    }
+  }
+
   private handleApiError(error: any): never {
     if (error.code === 404 || error.status === 404) {
       throw new ProviderError(`Spreadsheet not found or inaccessible.`);

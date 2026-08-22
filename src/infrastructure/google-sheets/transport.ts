@@ -12,4 +12,5 @@ export interface IGoogleSheetsTransport {
   createSheet?(sheetName: string): Promise<void>;
   ensureSheetExists?(sheetName: string): Promise<boolean>;
   applyDataValidation?(sheetName: string, columnIndex: number, options: string[]): Promise<void>;
+  applyNumberValidation?(sheetName: string, columnIndex: number, minVal?: number, isInteger?: boolean): Promise<void>;
 }

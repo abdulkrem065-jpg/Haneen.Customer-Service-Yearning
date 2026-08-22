@@ -127,3 +127,121 @@ export function validateAndCleanValue(
   }
 }
 
+export interface ValidationResult {
+  valid: boolean;
+  cleanedValue?: string;
+  error?: string;
+}
+
+export function validateStrictInput(
+  domain: 'products' | 'categories' | 'payment_methods' | 'store_contacts' | 'delivery' | 'general',
+  field: string,
+  rawVal: string,
+  ctx?: {
+    validCategories?: string[];
+    categoryMap?: Map<string, string> | Record<string, string>;
+  }
+): ValidationResult {
+  const trimmed = (rawVal || '').trim();
+
+  // 1. Numeric field validations
+  if (field === 'price' || field === 'deliveryFee' || field === 'minOrderAmount' || field === 'amount') {
+    if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+      return {
+        valid: false,
+        error: `REJECT: ${field} must be a valid non-negative number without text units (got "${rawVal}")`
+      };
+    }
+    const num = parseFloat(trimmed);
+    if (isNaN(num) || num < 0) {
+      return { valid: false, error: `REJECT: ${field} cannot be negative (got "${rawVal}")` };
+    }
+    return { valid: true, cleanedValue: num.toString() };
+  }
+
+  if (field === 'quantity') {
+    if (!/^\d+$/.test(trimmed)) {
+      return {
+        valid: false,
+        error: `REJECT: quantity must be a valid non-negative integer without text (got "${rawVal}")`
+      };
+    }
+    const num = parseInt(trimmed, 10);
+    if (isNaN(num) || num < 0) {
+      return { valid: false, error: `REJECT: quantity cannot be negative (got "${rawVal}")` };
+    }
+    return { valid: true, cleanedValue: num.toString() };
+  }
+
+  // 2. Boolean fields
+  if (field === 'inStock' || field === 'isActive' || field === 'enabled') {
+    if (trimmed === 'TRUE' || trimmed === 'FALSE') {
+      return { valid: true, cleanedValue: trimmed };
+    }
+    return {
+      valid: false,
+      error: `REJECT: ${field} must be strictly TRUE or FALSE (got "${rawVal}")`
+    };
+  }
+
+  // 3. Currency field
+  if (field === 'currency') {
+    const validCurrencies = ['YER', 'SAR', 'USD'];
+    if (validCurrencies.includes(trimmed)) {
+      return { valid: true, cleanedValue: trimmed };
+    }
+    return {
+      valid: false,
+      error: `REJECT: currency must be YER, SAR, or USD (got "${rawVal}")`
+    };
+  }
+
+  // 4. Category field
+  if (field === 'categoryId' || field === 'category') {
+    if (ctx?.validCategories && ctx.validCategories.length > 0) {
+      const isValid = ctx.validCategories.some(
+        c => c.toLowerCase() === trimmed.toLowerCase()
+      );
+      if (!isValid) {
+        return {
+          valid: false,
+          error: `REJECT: category "${rawVal}" does not exist in store categories dropdown`
+        };
+      }
+      return { valid: true, cleanedValue: trimmed };
+    }
+    if (!trimmed) {
+      return { valid: false, error: 'REJECT: category cannot be empty' };
+    }
+    return { valid: true, cleanedValue: trimmed };
+  }
+
+  // 5. Payment method type
+  if (field === 'methodType' || (domain === 'payment_methods' && field === 'type')) {
+    const validTypes = ['WALLET', 'CASH', 'BANK', 'OTHER'];
+    const upper = trimmed.toUpperCase();
+    if (validTypes.includes(upper)) {
+      return { valid: true, cleanedValue: upper };
+    }
+    return {
+      valid: false,
+      error: `REJECT: payment method type must be WALLET, CASH, BANK, or OTHER (got "${rawVal}")`
+    };
+  }
+
+  // 6. Contact channel type
+  if (field === 'channelType' || (domain === 'store_contacts' && field === 'type')) {
+    const validTypes = ['PHONE', 'WHATSAPP', 'EMAIL', 'OTHER'];
+    const upper = trimmed.toUpperCase();
+    if (validTypes.includes(upper)) {
+      return { valid: true, cleanedValue: upper };
+    }
+    return {
+      valid: false,
+      error: `REJECT: contact channel type must be PHONE, WHATSAPP, EMAIL, or OTHER (got "${rawVal}")`
+    };
+  }
+
+  return { valid: true, cleanedValue: trimmed };
+}
+

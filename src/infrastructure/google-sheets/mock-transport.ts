@@ -70,6 +70,7 @@ export class MockGoogleSheetsTransport implements IGoogleSheetsTransport {
   }
 
   private validations: Map<string, Array<{ col: number; options: string[] }>> = new Map();
+  private numberValidations: Map<string, Array<{ col: number; minVal: number; isInteger: boolean }>> = new Map();
 
   async applyDataValidation(sheetName: string, columnIndex: number, options: string[]): Promise<void> {
     this.initSheet(sheetName);
@@ -85,7 +86,25 @@ export class MockGoogleSheetsTransport implements IGoogleSheetsTransport {
     }
   }
 
+  async applyNumberValidation(sheetName: string, columnIndex: number, minVal: number = 0, isInteger: boolean = false): Promise<void> {
+    this.initSheet(sheetName);
+    if (!this.numberValidations.has(sheetName)) {
+      this.numberValidations.set(sheetName, []);
+    }
+    const list = this.numberValidations.get(sheetName)!;
+    const existingIdx = list.findIndex(v => v.col === columnIndex);
+    if (existingIdx >= 0) {
+      list[existingIdx] = { col: columnIndex, minVal, isInteger };
+    } else {
+      list.push({ col: columnIndex, minVal, isInteger });
+    }
+  }
+
   getValidations(sheetName: string): Array<{ col: number; options: string[] }> {
     return this.validations.get(sheetName) || [];
+  }
+
+  getNumberValidations(sheetName: string): Array<{ col: number; minVal: number; isInteger: boolean }> {
+    return this.numberValidations.get(sheetName) || [];
   }
 }

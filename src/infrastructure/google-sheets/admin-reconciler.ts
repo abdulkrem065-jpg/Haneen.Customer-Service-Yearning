@@ -458,6 +458,16 @@ export class GoogleSheetsAdminReconciler {
       await this.transport.applyDataValidation('products', catIdx, categoryNames);
     }
 
+    // numeric validations for price and quantity
+    const priceIdx = prodHeaders.indexOf('price');
+    if (priceIdx >= 0 && this.transport.applyNumberValidation) {
+      await this.transport.applyNumberValidation('products', priceIdx, 0, false);
+    }
+    const quantityIdx = prodHeaders.indexOf('quantity');
+    if (quantityIdx >= 0 && this.transport.applyNumberValidation) {
+      await this.transport.applyNumberValidation('products', quantityIdx, 0, true);
+    }
+
     // 2. Categories validations
     const catHeaders = CanonicalSchemas.categories.requiredHeaders;
     const catActiveIdx = catHeaders.indexOf('isActive');
