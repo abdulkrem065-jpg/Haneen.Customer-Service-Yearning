@@ -2,6 +2,7 @@ import { NoHallucinationGuard } from '../tools/no-hallucination-guard.js';
 import { UnauthorizedDataAccessError } from '../data/errors.js';
 import { AgentOrchestrator } from '../orchestrator.js';
 import { GeminiAIProvider } from '../../infrastructure/ai/gemini/gemini-provider.js';
+import { IAIProvider } from '../interfaces.js';
 import { InMemoryConversationContext } from '../../infrastructure/data/memory-conversation-context.js';
 import { SimpleToolRegistry } from '../mocks.js';
 import { AgentPolicy } from '../types.js';
@@ -80,12 +81,13 @@ export class HaneenService implements IHaneenService {
 
   private aiTimeoutMs: number;
   private sheetsTransport: IGoogleSheetsTransport | null = null;
+  private aiProvider: IAIProvider | null = null;
 
   constructor(
     sessionStore?: InMemorySessionStore,
     leadStore?: InMemoryLeadStore,
     rateLimiter?: ChatRateLimiter,
-    options?: { aiTimeoutMs?: number; identityStore?: AgentIdentityStore; sheetsTransport?: IGoogleSheetsTransport }
+    options?: { aiTimeoutMs?: number; identityStore?: AgentIdentityStore; sheetsTransport?: IGoogleSheetsTransport; aiProvider?: IAIProvider }
   ) {
     this.sessionStore = sessionStore || new InMemorySessionStore();
     this.leadStore = leadStore || new InMemoryLeadStore();
@@ -93,6 +95,7 @@ export class HaneenService implements IHaneenService {
     this.identityStore = options?.identityStore || AgentIdentityStore.getInstance();
     this.aiTimeoutMs = options?.aiTimeoutMs ?? 15000;
     this.sheetsTransport = options?.sheetsTransport || null;
+    this.aiProvider = options?.aiProvider || null;
   }
 
   public invalidatePolicyCache(): void {
@@ -341,7 +344,7 @@ export class HaneenService implements IHaneenService {
         error: err.message
       });
 
-      const fallbackText = `عذراً، الخدمة مشغولة حالياً. يمكنك إعادة المحاولة بعد لحظات وسنسعد بخدمتك.`;
+      const fallbackText = `عذراً، الخدمة مشغولة حالياً. جرّب معي بعد لحظات.`;
 
       this.sessionStore.addMessage(conversationId, {
         id: `msg-out-${Date.now()}`,
@@ -366,7 +369,7 @@ export class HaneenService implements IHaneenService {
 
     const policy = await this.getLiveKnowledgePolicy();
 
-    const aiProvider = new GeminiAIProvider({
+    const aiProvider = this.aiProvider || new GeminiAIProvider({
       apiKey: process.env.GEMINI_API_KEY || 'MOCK_KEY',
       isMockMode: !process.env.GEMINI_API_KEY
     });

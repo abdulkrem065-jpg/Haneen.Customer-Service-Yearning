@@ -4,6 +4,7 @@ import { IGeminiTransport, GeminiTransportParams } from './transport';
 import { AIProviderResponse } from '../../../core/interfaces';
 import { AIProviderError } from '../../../core/errors';
 import { GeminiAdapter } from './adapter';
+import { executeWithRetry, isRetriableError } from '../retry-policy';
 
 export class RealGeminiTransport implements IGeminiTransport {
   private ai: GoogleGenAI | null = null;
@@ -42,97 +43,90 @@ export class RealGeminiTransport implements IGeminiTransport {
       }
     ] : undefined;
 
-    // Deduplicated list of models to try in sequence upon rate limits
-    const rawModels: string[] = [this.config.model, GEMINI_MODELS.GENERAL, GEMINI_MODELS.FAST];
-    const modelsToTry: string[] = [];
-    for (const m of rawModels) {
-      const normalized = normalizeGeminiModelName(m);
-      if (!modelsToTry.includes(normalized)) {
-        modelsToTry.push(normalized);
-      }
-    }
+    const currentModel = normalizeGeminiModelName(this.config.model);
+    const isComplexModel = currentModel === GEMINI_MODELS.COMPLEX;
+    const enableThinking = isComplexModel && (this.config.enableThinking ?? false);
 
-    let lastError: Error | null = null;
+    const requestConfig: Record<string, any> = {
+      systemInstruction,
+      temperature: this.config.temperature,
+      tools: toolsConfig,
+    };
 
-    for (let i = 0; i < modelsToTry.length; i++) {
-      const currentModel = modelsToTry[i];
-      const isComplexModel = currentModel === GEMINI_MODELS.COMPLEX;
-      const enableThinking = isComplexModel && (this.config.enableThinking ?? true);
-
-      const requestConfig: Record<string, any> = {
-        systemInstruction,
-        temperature: this.config.temperature,
-        tools: toolsConfig,
+    if (enableThinking) {
+      requestConfig.thinkingConfig = {
+        thinkingLevel: ThinkingLevel.HIGH,
       };
-
-      if (enableThinking) {
-        requestConfig.thinkingConfig = {
-          thinkingLevel: ThinkingLevel.HIGH,
-        };
-        // Do not set maxOutputTokens when thinking is enabled
-      } else if (this.config.maxOutputTokens) {
-        requestConfig.maxOutputTokens = this.config.maxOutputTokens;
-      } else {
-        requestConfig.maxOutputTokens = 2048;
-      }
-
-      try {
-        const response = await this.ai.models.generateContent({
-          model: currentModel,
-          contents: formattedContents,
-          config: requestConfig,
-        });
-
-        const text = response.text || '';
-        const toolCalls: { name: string; params: Record<string, unknown> }[] = [];
-
-        if (response.functionCalls && response.functionCalls.length > 0) {
-          for (const call of response.functionCalls) {
-            toolCalls.push({
-              name: call.name,
-              params: (call.args as Record<string, unknown>) || {},
-            });
-          }
-        }
-
-        return {
-          text,
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-        };
-      } catch (error: unknown) {
-        if (error instanceof Error) {
-          lastError = error;
-          const isRateLimit = error.message.includes('429') ||
-                              error.message.includes('Quota') ||
-                              error.message.includes('RESOURCE_EXHAUSTED') ||
-                              error.message.includes('Rate Limit');
-
-          const isAuthError = error.message.includes('API key') ||
-                              error.message.includes('401') ||
-                              error.message.includes('403');
-
-          if (isAuthError) {
-            throw new AIProviderError('Gemini Authentication Error');
-          }
-
-          if (isRateLimit) {
-            // If there are more models to try, pause briefly and fall back to next model
-            if (i < modelsToTry.length - 1) {
-              await new Promise(res => setTimeout(res, 400 * (i + 1)));
-              continue;
-            }
-            throw new AIProviderError('Gemini Rate Limit Exceeded');
-          }
-
-          if (error.message.includes('TIMEOUT') || error.message.includes('DEADLINE')) {
-            throw new AIProviderError('Gemini Timeout');
-          }
-
-          throw new AIProviderError(`Gemini Provider Failure: ${error.message}`);
-        }
-      }
+    } else if (this.config.maxOutputTokens) {
+      requestConfig.maxOutputTokens = this.config.maxOutputTokens;
+    } else {
+      requestConfig.maxOutputTokens = 2048;
     }
 
-    throw new AIProviderError(lastError?.message ? `Gemini Provider Failure: ${lastError.message}` : 'Gemini Rate Limit Exceeded');
+    try {
+      return await executeWithRetry(
+        async (_attempt) => {
+          const response = await this.ai!.models.generateContent({
+            model: currentModel,
+            contents: formattedContents,
+            config: requestConfig,
+          });
+
+          const text = response.text || '';
+          const toolCalls: { name: string; params: Record<string, unknown> }[] = [];
+
+          if (response.functionCalls && response.functionCalls.length > 0) {
+            for (const call of response.functionCalls) {
+              toolCalls.push({
+                name: call.name,
+                params: (call.args as Record<string, unknown>) || {},
+              });
+            }
+          }
+
+          return {
+            text,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          };
+        },
+        {
+          maxAttempts: 3,
+          baseDelayMs: 200,
+          maxDelayMs: 2000,
+          jitter: true,
+        }
+      );
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        const msg = error.message;
+
+        const isAuthError = msg.includes('API key') ||
+                            msg.includes('401') ||
+                            msg.includes('403') ||
+                            msg.includes('UNAUTHENTICATED') ||
+                            msg.includes('PERMISSION_DENIED');
+
+        if (isAuthError) {
+          throw new AIProviderError('Gemini Authentication Error');
+        }
+
+        const isRateLimit = msg.includes('429') ||
+                            msg.includes('Quota') ||
+                            msg.includes('RESOURCE_EXHAUSTED') ||
+                            msg.includes('Rate Limit');
+
+        if (isRateLimit) {
+          throw new AIProviderError('Gemini Rate Limit Exceeded');
+        }
+
+        if (msg.includes('TIMEOUT') || msg.includes('DEADLINE')) {
+          throw new AIProviderError('Gemini Timeout');
+        }
+
+        throw new AIProviderError(`Gemini Provider Failure: ${msg}`);
+      }
+      throw new AIProviderError('Unknown error in Gemini Transport');
+    }
   }
 }
+
