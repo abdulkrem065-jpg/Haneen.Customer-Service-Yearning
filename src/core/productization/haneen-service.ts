@@ -14,6 +14,7 @@ import { HeaderMap } from '../../infrastructure/google-sheets/header-map.js';
 import { SecureGoogleSheetsTransport } from '../../infrastructure/google-sheets/secure-transport.js';
 import { GoogleServiceAccountAuth } from '../../infrastructure/google-sheets/auth.js';
 import { IGoogleSheetsTransport } from '../../infrastructure/google-sheets/transport.js';
+import { OrderCheckoutEngine } from '../orders/order-checkout-engine.js';
 
 export const CANONICAL_SPREADSHEET_ID = '1b8x4Ub263-Yxbs8_ypjTWrV1_sgM9gLoE3gRx8U2mLo';
 export const CANONICAL_TENANT_ID = 'tnt-41f0d530';
@@ -263,9 +264,26 @@ export class HaneenService implements IHaneenService {
 
     if (isHumanRequest) {
       session.status = 'REQUIRES_HUMAN';
+
+      let orderContext;
+      if (session.checkoutState && session.checkoutState.cart.length > 0) {
+        const subtotal = session.checkoutState.cart.reduce((s, i) => s + i.subtotal, 0);
+        const fee = session.checkoutState.deliveryFee || 0;
+        orderContext = {
+          orderId: session.checkoutState.createdOrderId || session.activeOrderId,
+          items: session.checkoutState.cart,
+          subtotal,
+          deliveryFee: fee,
+          total: subtotal + fee,
+          paymentMethod: session.checkoutState.paymentMethodName,
+          deliveryAddress: session.checkoutState.deliveryAddress
+        };
+      }
+
       session.handoffState = {
         reason: 'طلب العميل التحدث مع موظف بشري',
-        requestedAt: new Date()
+        requestedAt: new Date(),
+        ...(orderContext ? { orderContext } : {})
       };
       this.sessionStore.updateSession(session);
 
@@ -285,6 +303,31 @@ export class HaneenService implements IHaneenService {
         message: handoffMsg,
         status: 'REQUIRES_HUMAN',
         handoffState: session.handoffState,
+        timestamp: new Date()
+      };
+    }
+
+    // 5.5. Order Checkout Engine direct handler check
+    const checkoutEngine = new OrderCheckoutEngine();
+    const checkoutResult = await checkoutEngine.handleCheckoutMessage(userText, session, {
+      tenantId: CANONICAL_TENANT_ID,
+      storeId: CANONICAL_STORE_ID
+    });
+
+    if (checkoutResult) {
+      this.sessionStore.addMessage(conversationId, {
+        id: `msg-out-${Date.now()}`,
+        text: checkoutResult,
+        sender: 'AGENT',
+        timestamp: new Date()
+      });
+
+      this.sessionStore.updateSession(session);
+
+      return {
+        conversationId,
+        message: checkoutResult,
+        status: session.status,
         timestamp: new Date()
       };
     }
@@ -317,12 +360,30 @@ export class HaneenService implements IHaneenService {
 
       const agentText = outgoingMessage.text || `أهلاً بك! أنا ${agentIdentity.displayName} نسعد بخدمتك في متجر الذيباني.`;
 
+      // Check if response offers a product (e.g., "هل تريد إضافة الأناناس إلى طلبك؟")
+      if (agentText.includes('هل تريد إضافة') || agentText.includes('هل تود إضافة')) {
+        const prodMatch = agentText.match(/(?:إضافة|تود إضافة)\s+([^\s؟]+(?:\s+[^\s؟]+)?)/);
+        if (prodMatch) {
+          const prodName = prodMatch[1].trim();
+          if (!session.checkoutState) {
+            session.checkoutState = { cart: [], step: 'SHOPPING' };
+          }
+          session.checkoutState.lastOfferedProduct = {
+            id: `prod-${Date.now()}`,
+            name: prodName,
+            price: 500
+          };
+        }
+      }
+
       this.sessionStore.addMessage(conversationId, {
         id: outgoingMessage.messageId || `msg-out-${Date.now()}`,
         text: agentText,
         sender: 'AGENT',
         timestamp: new Date()
       });
+
+      this.sessionStore.updateSession(session);
 
       this.logger.info('Processed chat message successfully', {
         conversationId,

@@ -5,6 +5,31 @@ export interface ChatMessageItem {
   timestamp: Date;
 }
 
+export interface CartItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPriceSnapshot: number;
+  subtotal: number;
+}
+
+export interface OrderCheckoutState {
+  cart: CartItem[];
+  deliveryAddress?: string;
+  customerPhone?: string;
+  paymentMethodId?: string;
+  paymentMethodName?: string;
+  deliveryFee?: number;
+  step: 'SHOPPING' | 'CART' | 'ADDRESS' | 'PAYMENT' | 'SUMMARY' | 'CONFIRMED';
+  lastOfferedProduct?: {
+    id: string;
+    name: string;
+    price: number;
+  };
+  createdOrderId?: string;
+  idempotencyToken?: string;
+}
+
 export interface ConversationSession {
   conversationId: string;
   tenantId: string;
@@ -17,6 +42,15 @@ export interface ConversationSession {
   handoffState?: {
     reason: string;
     requestedAt: Date;
+    orderContext?: {
+      orderId?: string;
+      items: CartItem[];
+      subtotal: number;
+      deliveryFee: number;
+      total: number;
+      paymentMethod?: string;
+      deliveryAddress?: string;
+    };
   };
   leadState?: {
     name?: string;
@@ -26,6 +60,8 @@ export interface ConversationSession {
     userConfirmed: boolean;
     status: 'PENDING' | 'CONFIRMED';
   };
+  checkoutState?: OrderCheckoutState;
+  activeOrderId?: string;
 }
 
 export interface SessionStoreOptions {

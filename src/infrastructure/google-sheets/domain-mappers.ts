@@ -14,7 +14,9 @@ import {
   StoreNotice,
   FeatureToggle,
   Product,
-  Category
+  Category,
+  Order,
+  OrderItem
 } from '../../core/data/domain';
 import { CanonicalSchemas } from './schema-definitions';
 
@@ -725,5 +727,128 @@ export class ProductMapper implements ISheetMapper<Product> {
 
   getId(entity: Product): string {
     return entity.id;
+  }
+}
+
+export class OrderMapper implements ISheetMapper<Order> {
+  sheetName = CanonicalSchemas.orders.sheetName;
+  requiredHeaders = CanonicalSchemas.orders.requiredHeaders;
+  defaultHeaders = [...CanonicalSchemas.orders.requiredHeaders, ...CanonicalSchemas.orders.optionalHeaders];
+
+  fromRow(rowValues: string[], headerMap: HeaderMap): Order {
+    const id = headerMap.requireValue(rowValues, 'id');
+    const tenantId = headerMap.requireValue(rowValues, 'tenantId');
+    const storeId = headerMap.requireValue(rowValues, 'storeId');
+    const customerId = headerMap.requireValue(rowValues, 'customerId');
+    const totalAmountStr = headerMap.requireValue(rowValues, 'totalAmount');
+    const currency = headerMap.getValue(rowValues, 'currency') || 'YER';
+    const status = headerMap.requireValue(rowValues, 'status');
+    const subtotalStr = headerMap.getValue(rowValues, 'subtotal') || '0';
+    const deliveryFeeStr = headerMap.getValue(rowValues, 'deliveryFee') || '0';
+    const paymentMethodId = headerMap.getValue(rowValues, 'paymentMethodId') || '';
+    const paymentStatus = headerMap.getValue(rowValues, 'paymentStatus') || 'UNPAID';
+    const deliveryAddress = headerMap.getValue(rowValues, 'deliveryAddress') || '';
+    const customerPhone = headerMap.getValue(rowValues, 'customerPhone') || '';
+    const notes = headerMap.getValue(rowValues, 'notes') || '';
+    const createdAtStr = headerMap.requireValue(rowValues, 'createdAt');
+    const updatedAtStr = headerMap.requireValue(rowValues, 'updatedAt');
+
+    const totalAmount = parseFloat(totalAmountStr) || 0;
+
+    return {
+      id,
+      tenantId,
+      storeId,
+      customerId,
+      customerPhone,
+      items: [],
+      subtotal: parseFloat(subtotalStr) || totalAmount,
+      deliveryFee: parseFloat(deliveryFeeStr) || 0,
+      totalAmount,
+      total: totalAmount,
+      currency,
+      status: status as any,
+      paymentMethodId,
+      paymentStatus: paymentStatus as any,
+      deliveryAddress,
+      notes,
+      createdAt: new Date(createdAtStr),
+      updatedAt: new Date(updatedAtStr)
+    };
+  }
+
+  toRow(entity: Order, headerMap: HeaderMap): string[] {
+    return headerMap.buildRow({
+      id: entity.id,
+      tenantId: entity.tenantId,
+      storeId: entity.storeId,
+      customerId: entity.customerId,
+      totalAmount: (entity.totalAmount || entity.total || 0).toString(),
+      currency: entity.currency || 'YER',
+      status: entity.status,
+      subtotal: (entity.subtotal || 0).toString(),
+      deliveryFee: (entity.deliveryFee || 0).toString(),
+      paymentMethodId: entity.paymentMethodId || '',
+      paymentStatus: entity.paymentStatus || 'UNPAID',
+      deliveryAddress: entity.deliveryAddress || '',
+      customerPhone: entity.customerPhone || '',
+      notes: entity.notes || '',
+      createdAt: entity.createdAt.toISOString(),
+      updatedAt: entity.updatedAt.toISOString()
+    });
+  }
+
+  getId(entity: Order): string {
+    return entity.id;
+  }
+}
+
+export class OrderItemMapper implements ISheetMapper<OrderItem> {
+  sheetName = CanonicalSchemas.order_items.sheetName;
+  requiredHeaders = CanonicalSchemas.order_items.requiredHeaders;
+  defaultHeaders = [...CanonicalSchemas.order_items.requiredHeaders, ...CanonicalSchemas.order_items.optionalHeaders];
+
+  fromRow(rowValues: string[], headerMap: HeaderMap): OrderItem {
+    const rawId = headerMap.getValue(rowValues, 'id');
+    const orderId = headerMap.getValue(rowValues, 'orderId') || '';
+    const productId = headerMap.getValue(rowValues, 'productId') || '';
+    const productName = headerMap.getValue(rowValues, 'productNameSnapshot') || headerMap.getValue(rowValues, 'productName') || '';
+    const quantityStr = headerMap.getValue(rowValues, 'quantity') || '1';
+    const unitPriceStr = headerMap.getValue(rowValues, 'unitPriceSnapshot') || headerMap.getValue(rowValues, 'unitPrice') || '0';
+    const totalPriceStr = headerMap.getValue(rowValues, 'totalPrice') || headerMap.getValue(rowValues, 'subtotal') || '0';
+
+    const unitPrice = parseFloat(unitPriceStr) || 0;
+    const quantity = parseInt(quantityStr, 10) || 1;
+    const totalPrice = parseFloat(totalPriceStr) || (unitPrice * quantity);
+
+    return {
+      id: rawId || `item-${Date.now()}`,
+      orderId,
+      productId,
+      productNameSnapshot: productName,
+      productName,
+      quantity,
+      unitPriceSnapshot: unitPrice,
+      unitPrice,
+      totalPrice,
+      subtotal: totalPrice
+    };
+  }
+
+  toRow(entity: OrderItem, headerMap: HeaderMap): string[] {
+    return headerMap.buildRow({
+      id: entity.id || `item-${Date.now()}`,
+      orderId: entity.orderId || '',
+      productId: entity.productId,
+      productNameSnapshot: entity.productNameSnapshot || entity.productName || '',
+      quantity: entity.quantity.toString(),
+      unitPriceSnapshot: (entity.unitPriceSnapshot ?? entity.unitPrice ?? 0).toString(),
+      unitPrice: (entity.unitPrice ?? entity.unitPriceSnapshot ?? 0).toString(),
+      totalPrice: (entity.totalPrice ?? entity.subtotal ?? 0).toString()
+    });
+  }
+
+  getId(entity: OrderItem): string {
+    return entity.id || `${entity.orderId}-${entity.productId}`;
   }
 }

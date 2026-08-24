@@ -70,10 +70,16 @@ export interface Customer {
 }
 
 export interface OrderItem {
+  id?: string;
+  orderId?: string;
   productId: string;
+  productNameSnapshot?: string;
+  productName?: string;
   quantity: number;
+  unitPriceSnapshot?: number;
   unitPrice: number;
   totalPrice: number;
+  subtotal?: number;
 }
 
 export interface Order {
@@ -81,10 +87,19 @@ export interface Order {
   tenantId: string;
   storeId: string;
   customerId: string;
+  customerPhone?: string;
   items: OrderItem[];
+  subtotal?: number;
+  deliveryFee?: number;
   totalAmount: number;
+  total?: number;
   currency: string;
-  status: 'PENDING' | 'CONFIRMED' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
+  status: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_DELIVERY' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED' | string;
+  paymentMethodId?: string;
+  paymentMethodName?: string;
+  paymentStatus?: 'UNPAID' | 'PENDING' | 'PAID' | 'FAILED' | string;
+  deliveryAddress?: string;
+  notes?: string;
   createdAt: Date;
   updatedAt: Date;
 }

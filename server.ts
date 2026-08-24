@@ -276,6 +276,12 @@ async function startServer() {
     renderLiveHaneenVerificationUI(req, res);
   });
 
+  // CMD-080 Live Order Lifecycle Verification Endpoint
+  app.get('/api/admin/live-order-verification', async (req, res) => {
+    const { liveOrderVerificationEndpoint } = await import('./src/infrastructure/google-sheets/admin/live-order-verification-endpoint.js');
+    await liveOrderVerificationEndpoint(req, res);
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
