@@ -3,7 +3,7 @@ export type ChannelType = 'WEB' | 'WHATSAPP' | 'TELEGRAM' | string;
 export interface TenantContext {
   tenantId: string;
   storeId: string;
-  agentId: string;
+  agentId?: string;
 }
 
 export interface MessageContext {

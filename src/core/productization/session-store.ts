@@ -13,14 +13,34 @@ export interface CartItem {
   subtotal: number;
 }
 
+export type CheckoutStep =
+  | 'NO_ORDER'
+  | 'DRAFT_ITEMS'
+  | 'AWAITING_ADDRESS_AND_PAYMENT'
+  | 'AWAITING_CONFIRMATION'
+  | 'ORDER_CREATING'
+  | 'ORDER_CREATED'
+  | 'ORDER_STATUS_TRACKING'
+  | 'REQUIRES_HUMAN'
+  | 'SHOPPING'
+  | 'CART'
+  | 'ADDRESS'
+  | 'PAYMENT'
+  | 'SUMMARY'
+  | 'CONFIRMED';
+
 export interface OrderCheckoutState {
+  activeOrderDraftId?: string;
   cart: CartItem[];
   deliveryAddress?: string;
+  customerName?: string;
   customerPhone?: string;
   paymentMethodId?: string;
   paymentMethodName?: string;
+  subtotal?: number;
   deliveryFee?: number;
-  step: 'SHOPPING' | 'CART' | 'ADDRESS' | 'PAYMENT' | 'SUMMARY' | 'CONFIRMED';
+  total?: number;
+  step: CheckoutStep;
   lastOfferedProduct?: {
     id: string;
     name: string;

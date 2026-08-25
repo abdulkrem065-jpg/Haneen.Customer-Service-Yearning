@@ -15,6 +15,8 @@ import { SecureGoogleSheetsTransport } from '../../infrastructure/google-sheets/
 import { GoogleServiceAccountAuth } from '../../infrastructure/google-sheets/auth.js';
 import { IGoogleSheetsTransport } from '../../infrastructure/google-sheets/transport.js';
 import { OrderCheckoutEngine } from '../orders/order-checkout-engine.js';
+import { ProductMapper, DeliveryConfigurationMapper, PaymentMethodMapper } from '../../infrastructure/google-sheets/domain-mappers.js';
+import { Product, DeliveryConfiguration, PaymentMethod } from '../data/domain.js';
 
 export const CANONICAL_SPREADSHEET_ID = '1b8x4Ub263-Yxbs8_ypjTWrV1_sgM9gLoE3gRx8U2mLo';
 export const CANONICAL_TENANT_ID = 'tnt-41f0d530';
@@ -308,7 +310,11 @@ export class HaneenService implements IHaneenService {
     }
 
     // 5.5. Order Checkout Engine direct handler check
-    const checkoutEngine = new OrderCheckoutEngine();
+    const checkoutEngine = new OrderCheckoutEngine(
+      () => this.fetchCatalogProducts(),
+      () => this.fetchDeliveryConfiguration(),
+      () => this.fetchPaymentMethods()
+    );
     const checkoutResult = await checkoutEngine.handleCheckoutMessage(userText, session, {
       tenantId: CANONICAL_TENANT_ID,
       storeId: CANONICAL_STORE_ID
@@ -678,5 +684,91 @@ ${categoriesSummary}
 
     this.cachedPolicy = { policy, loadedAt: now };
     return policy;
+  }
+
+  private getSheetsTransport(): IGoogleSheetsTransport | null {
+    if (this.sheetsTransport) return this.sheetsTransport;
+    const clientEmail = process.env.GOOGLE_SHEETS_CLIENT_EMAIL;
+    const privateKey = process.env.GOOGLE_SHEETS_PRIVATE_KEY;
+    const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID || process.env.GOOGLE_SHEETS_ID;
+    if (clientEmail && privateKey && spreadsheetId === CANONICAL_SPREADSHEET_ID) {
+      const auth = new GoogleServiceAccountAuth({ clientEmail, privateKey, spreadsheetId });
+      return new SecureGoogleSheetsTransport(auth, { spreadsheetId });
+    }
+    return null;
+  }
+
+  public async fetchCatalogProducts(): Promise<Product[]> {
+    const transport = this.getSheetsTransport();
+    if (!transport) return [];
+    try {
+      const rows = await transport.getRows('products');
+      if (rows.length <= 1) return [];
+      const headerMap = new HeaderMap(rows[0].values, ['name', 'price']);
+      const products: Product[] = [];
+      const mapper = new ProductMapper();
+      for (let i = 1; i < rows.length; i++) {
+        try {
+          const item = mapper.fromRow(rows[i].values, headerMap);
+          if (item.tenantId === CANONICAL_TENANT_ID && item.storeId === CANONICAL_STORE_ID) {
+            products.push(item);
+          }
+        } catch (e) {
+          // ignore row map errors
+        }
+      }
+      return products;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  public async fetchDeliveryConfiguration(): Promise<DeliveryConfiguration | null> {
+    const transport = this.getSheetsTransport();
+    if (!transport) return null;
+    try {
+      const rows = await transport.getRows('delivery_configuration');
+      if (rows.length <= 1) return null;
+      const headerMap = new HeaderMap(rows[0].values, ['isEnabled', 'deliveryFee']);
+      const mapper = new DeliveryConfigurationMapper();
+      for (let i = 1; i < rows.length; i++) {
+        try {
+          const item = mapper.fromRow(rows[i].values, headerMap);
+          if (item.tenantId === CANONICAL_TENANT_ID && item.storeId === CANONICAL_STORE_ID) {
+            return item;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  public async fetchPaymentMethods(): Promise<PaymentMethod[]> {
+    const transport = this.getSheetsTransport();
+    if (!transport) return [];
+    try {
+      const rows = await transport.getRows('payment_methods');
+      if (rows.length <= 1) return [];
+      const headerMap = new HeaderMap(rows[0].values, ['displayName', 'isActive']);
+      const mapper = new PaymentMethodMapper();
+      const methods: PaymentMethod[] = [];
+      for (let i = 1; i < rows.length; i++) {
+        try {
+          const item = mapper.fromRow(rows[i].values, headerMap);
+          if (item.tenantId === CANONICAL_TENANT_ID && item.storeId === CANONICAL_STORE_ID) {
+            methods.push(item);
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+      return methods;
+    } catch (e) {
+      return [];
+    }
   }
 }
