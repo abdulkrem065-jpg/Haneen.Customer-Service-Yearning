@@ -8,11 +8,19 @@ export class OrderCheckoutEngine {
   private orderStore = OrderStore.getInstance();
   private adminNotifier = AdminNotifier.getInstance();
 
+  public catalogProductsSupplier?: () => Promise<Product[]>;
+
   constructor(
-    private readonly catalogProductsSupplier?: () => Promise<Product[]>,
+    catalogProductsSupplier?: () => Promise<Product[]>,
     private readonly deliveryConfigSupplier?: () => Promise<DeliveryConfiguration | null>,
     private readonly paymentMethodsSupplier?: () => Promise<PaymentMethod[]>
-  ) {}
+  ) {
+    this.catalogProductsSupplier = catalogProductsSupplier;
+  }
+
+  public setCatalogProductsSupplier(supplier: () => Promise<Product[]>): void {
+    this.catalogProductsSupplier = supplier;
+  }
 
   public async handleCheckoutMessage(
     userText: string,
@@ -57,9 +65,10 @@ export class OrderCheckoutEngine {
       }
     }
 
-    if (isStatusKeyword && !state.activeOrderDraftId && state.cart.length === 0) {
-      if (session.activeOrderId) {
-        const order = await this.orderStore.getOrderById(session.activeOrderId, context);
+    if (isStatusKeyword) {
+      const activeId = session.activeOrderId || state.createdOrderId;
+      if (activeId) {
+        const order = await this.orderStore.getOrderById(activeId, context);
         if (order) {
           const readableStatus = this.formatOrderStatus(order.status);
           return `طلبك رقم ${order.id} حالياً ${readableStatus}. مجموع الطلب: ${order.totalAmount} YER.`;
@@ -174,9 +183,10 @@ ${this.formatCartItemsList(state.cart)}
 
     if (isShortConfirmation && state.cart.length > 0 && (state.step === 'AWAITING_CONFIRMATION' || (state.deliveryAddress && state.paymentMethodId))) {
       // Re-verify Product Prices and Availability from Google Sheets (Section 10)
-      if (this.catalogProductsSupplier) {
+      const catalogSupplier = this.catalogProductsSupplier;
+      if (catalogSupplier) {
         try {
-          const liveProducts = await this.catalogProductsSupplier();
+          const liveProducts = await catalogSupplier();
           for (const cartItem of state.cart) {
             const liveProd = liveProducts.find(p => p.id === cartItem.productId || p.name.toLowerCase() === cartItem.productName.toLowerCase());
             if (liveProd) {
@@ -357,51 +367,134 @@ ${this.formatCartItemsList(state.cart)}
       }
     }
 
-    // --- 7. Product Request / Item Parsing (Section 3) ---
-    const isOrderRequest = (
-      lowerText.includes('اريد') ||
+    // --- 7. Product Resolution & Intent Gate (Informational Queries vs. Purchase Intent) ---
+
+    const isQuestionOrInquiry = (
+      lowerText.includes('كم') ||
+      lowerText.includes('سعر') ||
+      lowerText.includes('بكم') ||
+      lowerText.includes('السعر') ||
+      lowerText.includes('هل') ||
+      lowerText.includes('متوفر') ||
+      lowerText.includes('عندكم') ||
+      lowerText.includes('ما هو') ||
+      lowerText.includes('ما هي') ||
+      lowerText.includes('أين') ||
+      lowerText.includes('اين') ||
+      lowerText.includes('متى') ||
+      lowerText.includes('ما عندكم') ||
+      lowerText.includes('كام') ||
+      lowerText.includes('موجود') ||
+      lowerText.includes('أنواع') ||
+      lowerText.includes('انواع') ||
+      lowerText.includes('منتجات') ||
+      lowerText.includes('اصناف') ||
+      lowerText.includes('أصناف') ||
+      lowerText.includes('؟')
+    );
+
+    const isExplicitPurchaseVerb = (
       lowerText.includes('أريد') ||
+      lowerText.includes('اريد') ||
       lowerText.includes('بدنا') ||
       lowerText.includes('اشتري') ||
       lowerText.includes('أشتري') ||
-      lowerText.includes('كيلو') ||
-      lowerText.includes('سمن') ||
-      lowerText.includes('بسكوت') ||
-      lowerText.includes('سكر')
+      lowerText.includes('أضف') ||
+      lowerText.includes('اضف') ||
+      lowerText.includes('حط') ||
+      lowerText.includes('شراء') ||
+      lowerText.includes('طلب ') ||
+      lowerText.startsWith('طلب ')
     );
 
-    if (isOrderRequest) {
-      let catalog: Product[] = [
-        { id: 'prod-sugar', name: 'سكر', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-        { id: 'prod-samn', name: 'سمن الماس', price: 2500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-        { id: 'prod-biscuit', name: 'بسكوت ابو ولد', price: 100, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-        { id: 'prod-ananas', name: 'أناناس طازج', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() }
-      ];
+    let catalog: Product[] = [
+      { id: 'prod-sugar', name: 'سكر السعيد ابو كيلو', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-samn', name: 'سمن الماس', price: 2500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-biscuit', name: 'بسكوت ابو ولد', price: 100, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-biskrem', name: 'بسكوت بسكريم كبير', price: 300, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-ananas', name: 'أناناس طازج', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() }
+    ];
 
-      if (this.catalogProductsSupplier) {
-        try {
-          const live = await this.catalogProductsSupplier();
-          if (live && live.length > 0) catalog = live;
-        } catch (e) {
-          // Fallback to default catalog
+    const catalogSupplier = this.catalogProductsSupplier;
+    if (catalogSupplier) {
+      try {
+        const live = await catalogSupplier();
+        if (live && live.length > 0) catalog = live;
+      } catch (e) {
+        // Fallback to default catalog
+      }
+    }
+
+    // --- 7.1 INFORMATIONAL QUERIES (PRICE_QUERY / AVAILABILITY_QUERY / CATEGORY_QUERY) ---
+    // STRICT INVARIANT: INFORMATIONAL QUERIES MUST NEVER MUTATE CART OR CREATE ORDER DRAFT.
+    if (isQuestionOrInquiry && !isExplicitPurchaseVerb) {
+      const isPriceQuery = lowerText.includes('سعر') || lowerText.includes('بكم') || lowerText.includes('كم سعر');
+      const isAvailabilityQuery = lowerText.includes('هل') || lowerText.includes('متوفر') || lowerText.includes('عندكم') || lowerText.includes('موجود');
+      const isCategoryQuery = lowerText.includes('ما عندكم') || lowerText.includes('أنواع') || lowerText.includes('انواع') || lowerText.includes('منتجات') || lowerText.includes('اصناف');
+
+      const searchResult = this.resolveProductMatches(text, catalog);
+
+      if (isPriceQuery) {
+        if (searchResult.uniqueMatches.length === 1 && searchResult.ambiguousMatches.length === 0) {
+          const prod = searchResult.uniqueMatches[0].product;
+          return `سعر (${prod.name}) هو ${prod.price} YER.`;
+        } else if (searchResult.allMatchedProducts.length > 1) {
+          const listText = searchResult.allMatchedProducts.map(p => `- ${p.name}: ${p.price} YER`).join('\n');
+          return `أسعار المنتجات المتاحة لدينا:\n${listText}`;
+        } else if (searchResult.allMatchedProducts.length === 1) {
+          const prod = searchResult.allMatchedProducts[0];
+          return `سعر (${prod.name}) هو ${prod.price} YER.`;
         }
       }
 
-      let addedAny = false;
-      for (const prod of catalog) {
-        const prodNameLower = prod.name.toLowerCase();
-        if (lowerText.includes(prodNameLower) || (prodNameLower === 'سكر' && lowerText.includes('سكر')) || (prodNameLower.includes('سمن') && lowerText.includes('سمن')) || (prodNameLower.includes('بسكوت') && lowerText.includes('بسكوت'))) {
-          let qty = 1;
-          const qtyMatch = text.match(new RegExp(`(\\d+)\\s*${prod.name.split(' ')[0]}`, 'i'));
-          if (qtyMatch) {
-            qty = parseInt(qtyMatch[1], 10) || 1;
+      if (isAvailabilityQuery) {
+        if (searchResult.uniqueMatches.length === 1 && searchResult.ambiguousMatches.length === 0) {
+          const prod = searchResult.uniqueMatches[0].product;
+          if (prod.inStock !== false) {
+            state.lastOfferedProduct = { id: prod.id, name: prod.name, price: prod.price };
+            return `نعم، (${prod.name}) متوفر حالياً بالمخزن بسعر ${prod.price} YER. هل ترغب في إضافته إلى طلبك؟`;
+          } else {
+            return `عذراً، (${prod.name}) غير متوفر حالياً بالمخزن.`;
           }
-          this.addItemToCart(state, prod.id, prod.name, prod.price, qty);
-          addedAny = true;
+        } else if (searchResult.allMatchedProducts.length > 1) {
+          const listText = searchResult.allMatchedProducts.map(p => `- ${p.name}: ${p.price} YER (${p.inStock !== false ? 'متوفر' : 'غير متوفر'})`).join('\n');
+          return `نعم، متوفر لدينا الأنواع التالية:\n${listText}\nأيها ترغب في طلبه؟`;
+        } else if (searchResult.allMatchedProducts.length === 1) {
+          const prod = searchResult.allMatchedProducts[0];
+          if (prod.inStock !== false) {
+            state.lastOfferedProduct = { id: prod.id, name: prod.name, price: prod.price };
+            return `نعم، (${prod.name}) متوفر حالياً بالمخزن بسعر ${prod.price} YER. هل ترغب في إضافته إلى طلبك؟`;
+          } else {
+            return `عذراً، (${prod.name}) غير متوفر حالياً بالمخزن.`;
+          }
         }
       }
 
-      if (addedAny) {
+      if (isCategoryQuery && searchResult.allMatchedProducts.length > 0) {
+        const listText = searchResult.allMatchedProducts.map(p => `- ${p.name}: ${p.price} YER (${p.inStock !== false ? 'متوفر' : 'غير متوفر'})`).join('\n');
+        return `إليك المنتجات المتاحة في المتجر:\n${listText}`;
+      }
+
+      return null;
+    }
+
+    // --- 7.2 PURCHASE INTENT / ADD TO CART EXECUTION ---
+    const isOrderKeywordPresent = isExplicitPurchaseVerb || lowerText.includes('كيلو') || lowerText.includes('سمن') || lowerText.includes('بسكوت') || lowerText.includes('سكر') || lowerText.includes('أناناس') || lowerText.includes('اناناس');
+
+    if (isOrderKeywordPresent && !isQuestionOrInquiry) {
+      const searchResult = this.resolveProductMatches(text, catalog);
+
+      // MULTIPLE MATCHES SAFETY CHECK: If search yielded ambiguous matches without exact unique match
+      if (searchResult.ambiguousMatches.length > 1 && searchResult.uniqueMatches.length === 0) {
+        const optionsList = searchResult.ambiguousMatches.map(p => p.name).join('، ');
+        return `تتوفر لدينا عدة أنواع من المنتجات المطابقة: (${optionsList}). يرجى تحديد النوع المطلوب بدقة لإضافته إلى طلبك.`;
+      }
+
+      if (searchResult.uniqueMatches.length > 0) {
+        for (const item of searchResult.uniqueMatches) {
+          this.addItemToCart(state, item.product.id, item.product.name, item.product.price, item.quantity);
+        }
+
         if (!state.activeOrderDraftId) {
           state.activeOrderDraftId = `draft-${Date.now()}`;
         }
@@ -422,6 +515,74 @@ ${this.formatCartItemsList(state.cart)}
     }
 
     return null;
+  }
+
+  private normalizeArabic(str: string): string {
+    return str
+      .toLowerCase()
+      .replace(/[\u064B-\u0652]/g, '')
+      .replace(/[أإآ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/ى/g, 'ي')
+      .trim();
+  }
+
+  private resolveProductMatches(
+    userText: string,
+    catalog: Product[]
+  ): {
+    uniqueMatches: Array<{ product: Product; quantity: number }>;
+    ambiguousMatches: Product[];
+    allMatchedProducts: Product[];
+  } {
+    const normUserText = this.normalizeArabic(userText);
+
+    const qualifiedMatches: Array<{ product: Product; quantity: number }> = [];
+    const genericMatches: Product[] = [];
+
+    const categoryKeywords = ['سمن', 'بسكوت', 'عصير', 'رز', 'زيت', 'سكر', 'شاي', 'حليب', 'ماء', 'اناناس'];
+
+    for (const prod of catalog) {
+      const normProdName = this.normalizeArabic(prod.name);
+      const prodTokens = normProdName.split(' ').filter(t => t.length >= 2);
+
+      const genericToken = prodTokens.find(t => categoryKeywords.includes(t)) || prodTokens[0];
+      const qualifierTokens = prodTokens.filter(t => t !== genericToken && t.length >= 2);
+
+      const textContainsGeneric = normUserText.includes(genericToken) || normUserText.includes(normProdName);
+      const textContainsQualifier = qualifierTokens.length === 0 || qualifierTokens.some(qt => normUserText.includes(qt));
+
+      if (textContainsGeneric && textContainsQualifier) {
+        let qty = 1;
+        const qtyRegex = new RegExp(`(\\d+)\\s*(?:كيلو|علبه|علب|كرتون|بكت|حبه|حبات)?\\s*${genericToken}`, 'i');
+        const qtyMatch = userText.match(qtyRegex) || userText.match(/(\d+)/);
+        if (qtyMatch) {
+          qty = parseInt(qtyMatch[1], 10) || 1;
+        }
+        qualifiedMatches.push({ product: prod, quantity: qty });
+      } else if (textContainsGeneric) {
+        genericMatches.push(prod);
+      }
+    }
+
+    if (qualifiedMatches.length > 0) {
+      const allProdsMap = new Map<string, Product>();
+      for (const m of qualifiedMatches) allProdsMap.set(m.product.id, m.product);
+      return {
+        uniqueMatches: qualifiedMatches,
+        ambiguousMatches: [],
+        allMatchedProducts: Array.from(allProdsMap.values())
+      };
+    }
+
+    const allProdsMap = new Map<string, Product>();
+    for (const p of genericMatches) allProdsMap.set(p.id, p);
+
+    return {
+      uniqueMatches: [],
+      ambiguousMatches: genericMatches,
+      allMatchedProducts: Array.from(allProdsMap.values())
+    };
   }
 
   public addItemToCart(state: OrderCheckoutState, productId: string, productName: string, unitPrice: number, quantity: number): void {
