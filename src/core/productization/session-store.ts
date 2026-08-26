@@ -102,9 +102,17 @@ export class InMemorySessionStore {
     this.maxMessagesPerSession = options?.maxMessagesPerSession ?? 100; // Max 100 messages per session
   }
 
-  public getSession(conversationId: string): ConversationSession | undefined {
+  public getSession(conversationId: string, context?: { tenantId: string; storeId: string; agentId?: string }): ConversationSession | undefined {
     this.cleanupExpiredSessions();
-    return this.sessions.get(conversationId);
+    let session = this.sessions.get(conversationId);
+    if (!session && context) {
+      session = this.getOrCreateSession(conversationId, {
+        tenantId: context.tenantId,
+        storeId: context.storeId,
+        agentId: context.agentId || 'agt-c93183d5'
+      });
+    }
+    return session;
   }
 
   public getOrCreateSession(
@@ -191,5 +199,23 @@ export class InMemorySessionStore {
 
   public clear(): void {
     this.sessions.clear();
+  }
+}
+
+export class ConversationSessionStore {
+  private static instance: InMemorySessionStore | null = null;
+
+  public static getInstance(options?: SessionStoreOptions): InMemorySessionStore {
+    if (!ConversationSessionStore.instance) {
+      ConversationSessionStore.instance = new InMemorySessionStore(options);
+    }
+    return ConversationSessionStore.instance;
+  }
+
+  public static resetInstance(): void {
+    if (ConversationSessionStore.instance) {
+      ConversationSessionStore.instance.clear();
+    }
+    ConversationSessionStore.instance = null;
   }
 }

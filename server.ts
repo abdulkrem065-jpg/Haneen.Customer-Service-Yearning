@@ -282,6 +282,46 @@ async function startServer() {
     await liveOrderVerificationEndpoint(req, res);
   });
 
+  // CMD-088 Admin Orders and Notifications Visibility API Endpoints
+  app.get('/api/admin/orders', async (req, res) => {
+    try {
+      const { OrderStore } = await import('./src/core/orders/order-store.js');
+      const store = OrderStore.getInstance();
+      const orders = await store.getOrders({ tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID });
+      res.status(200).json({ success: true, count: orders.length, orders });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to fetch orders' });
+    }
+  });
+
+  app.post('/api/admin/orders/status', async (req, res) => {
+    try {
+      const { orderId, status } = req.body || {};
+      if (!orderId || !status) {
+        return res.status(400).json({ success: false, error: 'orderId and status are required' });
+      }
+      const { OrderStore } = await import('./src/core/orders/order-store.js');
+      const store = OrderStore.getInstance();
+      const context = { tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID };
+      await store.updateOrderStatus(orderId, status, context);
+      const updated = await store.getOrderById(orderId, context);
+      res.status(200).json({ success: true, verdict: 'ORDER_STATUS_UPDATED', order: updated });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to update order status' });
+    }
+  });
+
+  app.get('/api/admin/notifications', async (req, res) => {
+    try {
+      const { AdminNotifier } = await import('./src/core/orders/admin-notifier.js');
+      const notifier = AdminNotifier.getInstance();
+      const notifications = notifier.getNotifications({ tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID });
+      res.status(200).json({ success: true, count: notifications.length, notifications });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to fetch notifications' });
+    }
+  });
+
   // Health check
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });

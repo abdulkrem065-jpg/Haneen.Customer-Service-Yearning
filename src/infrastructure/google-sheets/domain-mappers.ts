@@ -746,6 +746,7 @@ export class OrderMapper implements ISheetMapper<Order> {
     const subtotalStr = headerMap.getValue(rowValues, 'subtotal') || '0';
     const deliveryFeeStr = headerMap.getValue(rowValues, 'deliveryFee') || '0';
     const paymentMethodId = headerMap.getValue(rowValues, 'paymentMethodId') || '';
+    const paymentMethodName = headerMap.getValue(rowValues, 'paymentMethodName') || '';
     const paymentStatus = headerMap.getValue(rowValues, 'paymentStatus') || 'UNPAID';
     const deliveryAddress = headerMap.getValue(rowValues, 'deliveryAddress') || '';
     const customerPhone = headerMap.getValue(rowValues, 'customerPhone') || '';
@@ -769,6 +770,7 @@ export class OrderMapper implements ISheetMapper<Order> {
       currency,
       status: status as any,
       paymentMethodId,
+      paymentMethodName,
       paymentStatus: paymentStatus as any,
       deliveryAddress,
       notes,
@@ -789,6 +791,7 @@ export class OrderMapper implements ISheetMapper<Order> {
       subtotal: (entity.subtotal || 0).toString(),
       deliveryFee: (entity.deliveryFee || 0).toString(),
       paymentMethodId: entity.paymentMethodId || '',
+      paymentMethodName: entity.paymentMethodName || '',
       paymentStatus: entity.paymentStatus || 'UNPAID',
       deliveryAddress: entity.deliveryAddress || '',
       customerPhone: entity.customerPhone || '',

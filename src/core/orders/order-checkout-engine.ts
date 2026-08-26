@@ -1,21 +1,29 @@
 import { OrderStore } from './order-store';
-import { AdminNotifier } from './admin-notifier';
+import { AdminNotifier, IOrderNotificationService } from './admin-notifier';
 import { ConversationSession, CartItem, OrderCheckoutState, CheckoutStep } from '../productization/session-store';
 import { DataOperationContext } from '../data/provider';
 import { Product, DeliveryConfiguration, PaymentMethod } from '../data/domain';
 
 export class OrderCheckoutEngine {
   private orderStore = OrderStore.getInstance();
-  private adminNotifier = AdminNotifier.getInstance();
+  private adminNotifier: IOrderNotificationService = AdminNotifier.getInstance();
 
   public catalogProductsSupplier?: () => Promise<Product[]>;
 
   constructor(
     catalogProductsSupplier?: () => Promise<Product[]>,
     private readonly deliveryConfigSupplier?: () => Promise<DeliveryConfiguration | null>,
-    private readonly paymentMethodsSupplier?: () => Promise<PaymentMethod[]>
+    private readonly paymentMethodsSupplier?: () => Promise<PaymentMethod[]>,
+    orderStore?: OrderStore,
+    adminNotifier?: IOrderNotificationService
   ) {
     this.catalogProductsSupplier = catalogProductsSupplier;
+    if (orderStore) {
+      this.orderStore = orderStore;
+    }
+    if (adminNotifier) {
+      this.adminNotifier = adminNotifier;
+    }
   }
 
   public setCatalogProductsSupplier(supplier: () => Promise<Product[]>): void {
@@ -113,7 +121,7 @@ ${this.formatCartItemsList(state.cart)}
     const isExplicitIdentity = lowerText.includes('الاسم') || lowerText.includes('الهاتف') || lowerText.includes('جوال') || (phoneMatch && hasNameLikeText && (state.activeOrderDraftId || state.cart.length > 0));
 
     if (isExplicitIdentity && (state.activeOrderDraftId || state.cart.length > 0)) {
-      let phone = state.customerPhone || '777123456';
+      let phone = state.customerPhone;
       if (phoneMatch) {
         phone = phoneMatch[0];
       }
@@ -138,8 +146,9 @@ ${this.formatCartItemsList(state.cart)}
         return this.generateOrderSummary(state);
       } else {
         state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
-        return `تم تسجيل بياناتك بنجاح: ${name ? `${name} - ` : ''}رقم الهاتف (${phone}).
-يرجى تزويدنا بعنوان التوصيل وطريقة الدفع لإكمال الطلب.`;
+        const phoneText = phone ? `رقم الهاتف (${phone}).` : '';
+        return `تم تسجيل بياناتك بنجاح: ${name ? `${name} - ` : ''}${phoneText}
+يرجى تزويدنا بعنوان التوصيل وطريقة الدفع لإكمال الطلب.`.trim();
       }
     }
 
@@ -213,43 +222,66 @@ ${this.formatCartItemsList(state.cart)}
       state.subtotal = subtotal;
       state.total = totalAmount;
 
-      // Create Order in OrderStore (Section 14)
+      // Create Order in OrderStore (Durable Persistence Check)
       state.step = 'ORDER_CREATING';
-      const createdOrder = await this.orderStore.createOrder(
-        {
-          customerId: 'cst-web-customer',
-          customerPhone: state.customerPhone || '777123456',
-          items: state.cart.map(i => ({
-            productId: i.productId,
-            productNameSnapshot: i.productName,
-            quantity: i.quantity,
-            unitPriceSnapshot: i.unitPriceSnapshot
-          })),
-          subtotal,
-          deliveryFee: state.deliveryFee,
-          totalAmount,
-          currency: 'YER',
-          paymentMethodId: state.paymentMethodId || 'pay-cod',
-          paymentMethodName: state.paymentMethodName || 'كاش عند الاستلام',
-          paymentStatus: 'UNPAID',
-          deliveryAddress: state.deliveryAddress || 'استلام من الفرع / العنوان الافتراضي'
-        },
-        context
-      );
-
-      // Resilient Admin Notification (Section 16)
+      let createdOrder;
       try {
-        await this.adminNotifier.notifyNewOrder(createdOrder, context);
+        createdOrder = await this.orderStore.createOrder(
+          {
+            customerId: 'cst-web-customer',
+            customerPhone: state.customerPhone || '',
+            items: state.cart.map(i => ({
+              productId: i.productId,
+              productNameSnapshot: i.productName,
+              quantity: i.quantity,
+              unitPriceSnapshot: i.unitPriceSnapshot
+            })),
+            subtotal,
+            deliveryFee: state.deliveryFee,
+            totalAmount,
+            currency: 'YER',
+            paymentMethodId: state.paymentMethodId || 'pay-cod',
+            paymentMethodName: state.paymentMethodName || 'كاش عند الاستلام',
+            paymentStatus: 'UNPAID',
+            deliveryAddress: state.deliveryAddress || 'استلام من الفرع / العنوان الافتراضي'
+          },
+          context
+        );
+      } catch (err) {
+        console.error('[OrderCheckoutEngine] Order persistence failed:', err);
+        state.step = 'AWAITING_CONFIRMATION';
+        return 'تعذر إتمام ونشاط حفظ الطلب حالياً، يرجى المحاولة مرة أخرى بعد لحظات.';
+      }
+
+      if (!createdOrder || !createdOrder.id) {
+        state.step = 'AWAITING_CONFIRMATION';
+        return 'تعذر إتمام ونشاط حفظ الطلب حالياً، يرجى المحاولة مرة أخرى بعد لحظات.';
+      }
+
+      // Resilient Admin Notification (CMD-088)
+      let notifResult: { success: boolean; notificationId: string; status: 'PENDING' | 'SENT' | 'FAILED' } | null = null;
+      try {
+        notifResult = await this.adminNotifier.notifyNewOrder(createdOrder, context);
       } catch (err) {
         console.warn('[OrderCheckoutEngine] Admin notification failure (non-blocking):', err);
       }
 
-      // Update State
+      // Update State ONLY after successful durable persistence
       state.createdOrderId = createdOrder.id;
       state.step = 'ORDER_CREATED';
       session.activeOrderId = createdOrder.id;
 
-      const customerDisplay = state.customerName ? `${state.customerName} (${createdOrder.customerPhone})` : createdOrder.customerPhone;
+      const phoneStr = createdOrder.customerPhone ? `(${createdOrder.customerPhone})` : '';
+      const customerDisplay = state.customerName
+        ? `${state.customerName} ${phoneStr}`.trim()
+        : (createdOrder.customerPhone || 'غير محدد');
+
+      let notificationMsg = 'تم تسديد وتسجيل الإشعار الإداري لمتابعة طلبك.';
+      if (notifResult?.status === 'SENT') {
+        notificationMsg = 'تم إشعار الإدارة بنجاح ومتابعة طلبك.';
+      } else if (notifResult?.status === 'FAILED' || (!notifResult && true)) {
+        notificationMsg = 'ملاحظة: تعذر إرسال إشعار تلقائي للإدارة حالياً، لكن تم تسجيل طلبك بنجاح وسنتواصل معك قريباً.';
+      }
 
       return `تم استلام طلبك بنجاح. رقم طلبك: ${createdOrder.id}
 الحالة: PENDING (قيد الانتظار والتأكيد)
@@ -257,7 +289,7 @@ ${this.formatCartItemsList(state.cart)}
 العميل: ${customerDisplay}
 طريقة الدفع: ${createdOrder.paymentMethodName}
 عنوان التوصيل: ${createdOrder.deliveryAddress}
-سيتم إشعار الإدارة ومتابعة طلبك فوراً.`;
+${notificationMsg}`;
     }
 
     // --- 6. Address and Payment Parsing (Single or Combined Message) (Section 4, 11, 12) ---
