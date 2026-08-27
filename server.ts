@@ -282,32 +282,108 @@ async function startServer() {
     await liveOrderVerificationEndpoint(req, res);
   });
 
-  // CMD-088 Admin Orders and Notifications Visibility API Endpoints
+  // CMD-088 & CMD-090 Admin Orders and Notifications Visibility API Endpoints
   app.get('/api/admin/orders', async (req, res) => {
     try {
       const { OrderStore } = await import('./src/core/orders/order-store.js');
+      const { UnauthorizedDataAccessError } = await import('./src/core/data/errors.js');
       const store = OrderStore.getInstance();
-      const orders = await store.getOrders({ tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID });
+      const tenantId = (req.query.tenantId as string) || CANONICAL_TENANT_ID;
+      const storeId = (req.query.storeId as string) || CANONICAL_STORE_ID;
+      const context = { tenantId, storeId };
+      const orders = await store.getOrders(context);
       res.status(200).json({ success: true, count: orders.length, orders });
     } catch (err: any) {
+      if (err.name === 'UnauthorizedDataAccessError' || err.message?.includes('Cross-')) {
+        return res.status(403).json({ success: false, error: err.message });
+      }
       res.status(500).json({ success: false, error: err.message || 'Failed to fetch orders' });
+    }
+  });
+
+  app.get('/api/admin/orders/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { OrderStore } = await import('./src/core/orders/order-store.js');
+      const store = OrderStore.getInstance();
+      const tenantId = (req.query.tenantId as string) || CANONICAL_TENANT_ID;
+      const storeId = (req.query.storeId as string) || CANONICAL_STORE_ID;
+      const context = { tenantId, storeId };
+      const order = await store.getOrderById(id, context);
+      if (!order) {
+        return res.status(404).json({ success: false, error: `Order ${id} not found` });
+      }
+      res.status(200).json({ success: true, order });
+    } catch (err: any) {
+      if (err.name === 'UnauthorizedDataAccessError' || err.message?.includes('Cross-') || err.message?.includes('Unauthorized')) {
+        return res.status(403).json({ success: false, error: err.message });
+      }
+      res.status(500).json({ success: false, error: err.message || 'Failed to fetch order details' });
     }
   });
 
   app.post('/api/admin/orders/status', async (req, res) => {
     try {
-      const { orderId, status } = req.body || {};
+      const { orderId, status, tenantId, storeId } = req.body || {};
       if (!orderId || !status) {
         return res.status(400).json({ success: false, error: 'orderId and status are required' });
       }
       const { OrderStore } = await import('./src/core/orders/order-store.js');
       const store = OrderStore.getInstance();
-      const context = { tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID };
+      const context = {
+        tenantId: tenantId || CANONICAL_TENANT_ID,
+        storeId: storeId || CANONICAL_STORE_ID
+      };
+
+      // Check if order exists and belongs to context before updating
+      const existing = await store.getOrderById(orderId, context);
+      if (!existing) {
+        return res.status(404).json({ success: false, error: `Order ${orderId} not found` });
+      }
+
       await store.updateOrderStatus(orderId, status, context);
       const updated = await store.getOrderById(orderId, context);
       res.status(200).json({ success: true, verdict: 'ORDER_STATUS_UPDATED', order: updated });
     } catch (err: any) {
+      if (err.name === 'UnauthorizedDataAccessError' || err.message?.includes('Cross-') || err.message?.includes('Unauthorized')) {
+        return res.status(403).json({ success: false, error: err.message });
+      }
+      if (err.name === 'DataNotFoundError' || err.message?.includes('not found')) {
+        return res.status(404).json({ success: false, error: err.message });
+      }
       res.status(500).json({ success: false, error: err.message || 'Failed to update order status' });
+    }
+  });
+
+  app.post('/api/admin/orders/payment-status', async (req, res) => {
+    try {
+      const { orderId, paymentStatus, tenantId, storeId } = req.body || {};
+      if (!orderId || !paymentStatus) {
+        return res.status(400).json({ success: false, error: 'orderId and paymentStatus are required' });
+      }
+      const { OrderStore } = await import('./src/core/orders/order-store.js');
+      const store = OrderStore.getInstance();
+      const context = {
+        tenantId: tenantId || CANONICAL_TENANT_ID,
+        storeId: storeId || CANONICAL_STORE_ID
+      };
+
+      const existing = await store.getOrderById(orderId, context);
+      if (!existing) {
+        return res.status(404).json({ success: false, error: `Order ${orderId} not found` });
+      }
+
+      await store.updatePaymentStatus(orderId, paymentStatus, context);
+      const updated = await store.getOrderById(orderId, context);
+      res.status(200).json({ success: true, verdict: 'PAYMENT_STATUS_UPDATED', order: updated });
+    } catch (err: any) {
+      if (err.name === 'UnauthorizedDataAccessError' || err.message?.includes('Cross-') || err.message?.includes('Unauthorized')) {
+        return res.status(403).json({ success: false, error: err.message });
+      }
+      if (err.name === 'DataNotFoundError' || err.message?.includes('not found')) {
+        return res.status(404).json({ success: false, error: err.message });
+      }
+      res.status(500).json({ success: false, error: err.message || 'Failed to update payment status' });
     }
   });
 

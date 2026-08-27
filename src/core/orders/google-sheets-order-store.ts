@@ -170,12 +170,14 @@ export class GoogleSheetsOrderStore implements IOrderStore {
 
     // CRITICAL: Strict Identity - No fallback to store phone!
     const customerPhone = payload.customerPhone?.trim() || '';
+    const customerName = payload.customerName?.trim() || '';
 
     const newOrder: Order = {
       id: orderId,
       tenantId: context.tenantId,
       storeId: context.storeId,
       customerId: payload.customerId || 'cst-web-customer',
+      customerName,
       customerPhone,
       items: [],
       subtotal,
@@ -374,12 +376,18 @@ export class GoogleSheetsOrderStore implements IOrderStore {
       const row = orderRows[i];
       try {
         const order = this.orderMapper.fromRow(row.values, orderHeaderMap);
-        if (order.id === orderId && order.tenantId === context.tenantId && order.storeId === context.storeId) {
+        if (order.id === orderId) {
+          if (order.tenantId !== context.tenantId || order.storeId !== context.storeId) {
+            throw new UnauthorizedDataAccessError(`Unauthorized access to order ${orderId}`);
+          }
           targetRowIndex = row.rowNumber;
           existingOrder = order;
           break;
         }
       } catch (err) {
+        if (err instanceof UnauthorizedDataAccessError) {
+          throw err;
+        }
         // Skip
       }
     }
@@ -427,12 +435,18 @@ export class GoogleSheetsOrderStore implements IOrderStore {
       const row = orderRows[i];
       try {
         const order = this.orderMapper.fromRow(row.values, orderHeaderMap);
-        if (order.id === orderId && order.tenantId === context.tenantId && order.storeId === context.storeId) {
+        if (order.id === orderId) {
+          if (order.tenantId !== context.tenantId || order.storeId !== context.storeId) {
+            throw new UnauthorizedDataAccessError(`Unauthorized access to order ${orderId}`);
+          }
           targetRowIndex = row.rowNumber;
           existingOrder = order;
           break;
         }
       } catch (err) {
+        if (err instanceof UnauthorizedDataAccessError) {
+          throw err;
+        }
         // Skip
       }
     }

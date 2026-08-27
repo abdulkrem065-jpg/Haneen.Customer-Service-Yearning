@@ -276,11 +276,11 @@ ${this.formatCartItemsList(state.cart)}
         ? `${state.customerName} ${phoneStr}`.trim()
         : (createdOrder.customerPhone || 'غير محدد');
 
-      let notificationMsg = 'تم تسديد وتسجيل الإشعار الإداري لمتابعة طلبك.';
+      let notificationMsg = 'تم تسجيل طلبك، وجارٍ إرسال الإشعار للإدارة.';
       if (notifResult?.status === 'SENT') {
-        notificationMsg = 'تم إشعار الإدارة بنجاح ومتابعة طلبك.';
+        notificationMsg = 'تم استلام طلبك وتم إشعار الإدارة بنجاح.';
       } else if (notifResult?.status === 'FAILED' || (!notifResult && true)) {
-        notificationMsg = 'ملاحظة: تعذر إرسال إشعار تلقائي للإدارة حالياً، لكن تم تسجيل طلبك بنجاح وسنتواصل معك قريباً.';
+        notificationMsg = 'تم تسجيل طلبك، لكن تعذر إرسال إشعار تلقائي للإدارة حالياً.';
       }
 
       return `تم استلام طلبك بنجاح. رقم طلبك: ${createdOrder.id}

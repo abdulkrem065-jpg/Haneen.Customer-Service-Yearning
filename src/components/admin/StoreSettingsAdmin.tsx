@@ -21,7 +21,12 @@ import {
   ShieldCheck,
   Edit2,
   Check,
-  Save
+  Save,
+  ShoppingBag,
+  Package,
+  Eye,
+  UserCheck,
+  Calendar
 } from 'lucide-react';
 
 interface SettingCategory {
@@ -32,6 +37,7 @@ interface SettingCategory {
 }
 
 const CATEGORIES: SettingCategory[] = [
+  { id: 'orders', nameAr: 'مركز إدارة الطلبات', icon: ShoppingBag, descriptionAr: 'عرض طلبات العملاء الحقيقية ومتابعة الحالات وتحديث Google Sheets' },
   { id: 'identity', nameAr: 'هوية المتجر', icon: Store, descriptionAr: 'اسم المتجر، الشعار والمستندات' },
   { id: 'haneen', nameAr: 'إعدادات المساعد الذكي', icon: Bot, descriptionAr: 'اسم الوكيل (سناء)، الشخصية والنبرة' },
   { id: 'currency', nameAr: 'العملة (YER)', icon: Coins, descriptionAr: 'العملة الأساسية (الريال اليمني - YER)' },
@@ -136,10 +142,107 @@ interface StoreSettingsAdminProps {
 }
 
 export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose }) => {
-  const [activeCategory, setActiveCategory] = useState('haneen');
+  const [activeCategory, setActiveCategory] = useState('orders');
   const [isLoading, setIsLoading] = useState(false);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [errorStatus, setErrorStatus] = useState<string | null>(null);
+
+  // Admin Order Center State
+  const [adminOrders, setAdminOrders] = useState<any[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+
+  const fetchOrders = async () => {
+    setOrdersLoading(true);
+    setErrorStatus(null);
+    try {
+      const res = await fetch(`/api/admin/orders?tenantId=${trustedContext.tenantId}&storeId=${trustedContext.storeId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.orders)) {
+          setAdminOrders(data.orders);
+        }
+      } else {
+        const errData = await res.json();
+        setErrorStatus(errData.error || 'فشل في جلب الطلبات من Google Sheets');
+      }
+    } catch (err: any) {
+      setErrorStatus(`خطأ اتصال: ${err.message}`);
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
+    setUpdatingOrderId(orderId);
+    setErrorStatus(null);
+    setSaveStatus(null);
+    try {
+      const res = await fetch('/api/admin/orders/status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          status: newStatus,
+          tenantId: trustedContext.tenantId,
+          storeId: trustedContext.storeId
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.order) {
+        setSaveStatus(`تم تحديث حالة الطلب (${orderId}) إلى (${newStatus}) وتوثيقها في Google Sheets`);
+        setAdminOrders(prev => prev.map(o => o.id === orderId ? data.order : o));
+        if (selectedOrder?.id === orderId) {
+          setSelectedOrder(data.order);
+        }
+      } else {
+        setErrorStatus(data.error || `فشل تحديث حالة الطلب (${orderId})`);
+      }
+    } catch (err: any) {
+      setErrorStatus(`خطأ في الاتصال أثناء تحديث الحالة: ${err.message}`);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  const handleUpdatePaymentStatus = async (orderId: string, newPaymentStatus: string) => {
+    setUpdatingOrderId(orderId);
+    setErrorStatus(null);
+    setSaveStatus(null);
+    try {
+      const res = await fetch('/api/admin/orders/payment-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          paymentStatus: newPaymentStatus,
+          tenantId: trustedContext.tenantId,
+          storeId: trustedContext.storeId
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.order) {
+        setSaveStatus(`تم تحديث حالة الدفع للطلب (${orderId}) إلى (${newPaymentStatus}) وتوثيقها في Google Sheets`);
+        setAdminOrders(prev => prev.map(o => o.id === orderId ? data.order : o));
+        if (selectedOrder?.id === orderId) {
+          setSelectedOrder(data.order);
+        }
+      } else {
+        setErrorStatus(data.error || `فشل تحديث حالة الدفع للطلب (${orderId})`);
+      }
+    } catch (err: any) {
+      setErrorStatus(`خطأ في الاتصال أثناء تحديث حالة الدفع: ${err.message}`);
+    } finally {
+      setUpdatingOrderId(null);
+    }
+  };
+
+  useEffect(() => {
+    if (activeCategory === 'orders') {
+      fetchOrders();
+    }
+  }, [activeCategory]);
 
   const [agentIdentityData, setAgentIdentityData] = useState({
     displayName: 'سناء',
@@ -406,6 +509,245 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
 
         {/* View Details Area */}
         <main className="flex-1 overflow-y-auto p-6 bg-slate-900 space-y-6">
+          {/* Order Center (CMD-090) */}
+          {activeCategory === 'orders' && (
+            <section className="space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                <div>
+                  <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                    <ShoppingBag className="w-5 h-5 text-emerald-400" />
+                    مركز إدارة الطلبات الحقيقية (Google Sheets Order Store)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    مصدر البيانات: Google Sheets (جدول orders & order_items) | التكلفة التشغيلية: $0 | العزل التام للمتاجر مفعل
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={fetchOrders}
+                    disabled={ordersLoading}
+                    className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors border border-emerald-500/30 shadow-lg"
+                  >
+                    <RefreshCw className={`w-4 h-4 ${ordersLoading ? 'animate-spin' : ''}`} />
+                    <span>تحديث الطلبات من Google Sheets</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Summary Stats Badges */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                <div className="bg-slate-950 border border-slate-800 p-3 rounded-xl text-center">
+                  <span className="text-xs text-slate-400 block mb-1">إجمالي الطلبات</span>
+                  <span className="text-lg font-bold text-white font-mono">{adminOrders.length}</span>
+                </div>
+                <div className="bg-slate-950 border border-yellow-500/30 p-3 rounded-xl text-center">
+                  <span className="text-xs text-yellow-400 block mb-1">قيد الانتظار</span>
+                  <span className="text-lg font-bold text-yellow-300 font-mono">
+                    {adminOrders.filter(o => o.status === 'PENDING').length}
+                  </span>
+                </div>
+                <div className="bg-slate-950 border border-blue-500/30 p-3 rounded-xl text-center">
+                  <span className="text-xs text-blue-400 block mb-1">مؤكد</span>
+                  <span className="text-lg font-bold text-blue-300 font-mono">
+                    {adminOrders.filter(o => o.status === 'CONFIRMED').length}
+                  </span>
+                </div>
+                <div className="bg-slate-950 border border-purple-500/30 p-3 rounded-xl text-center">
+                  <span className="text-xs text-purple-400 block mb-1">قيد التجهيز</span>
+                  <span className="text-lg font-bold text-purple-300 font-mono">
+                    {adminOrders.filter(o => o.status === 'PREPARING').length}
+                  </span>
+                </div>
+                <div className="bg-slate-950 border border-cyan-500/30 p-3 rounded-xl text-center">
+                  <span className="text-xs text-cyan-400 block mb-1">جاهز / خرج للتوصيل</span>
+                  <span className="text-lg font-bold text-cyan-300 font-mono">
+                    {adminOrders.filter(o => o.status === 'READY_FOR_DELIVERY' || o.status === 'OUT_FOR_DELIVERY').length}
+                  </span>
+                </div>
+                <div className="bg-slate-950 border border-emerald-500/30 p-3 rounded-xl text-center">
+                  <span className="text-xs text-emerald-400 block mb-1">تم التوصيل</span>
+                  <span className="text-lg font-bold text-emerald-300 font-mono">
+                    {adminOrders.filter(o => o.status === 'DELIVERED').length}
+                  </span>
+                </div>
+                <div className="bg-slate-950 border border-red-500/30 p-3 rounded-xl text-center">
+                  <span className="text-xs text-red-400 block mb-1">ملغي</span>
+                  <span className="text-lg font-bold text-red-300 font-mono">
+                    {adminOrders.filter(o => o.status === 'CANCELLED').length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Orders List */}
+              {ordersLoading ? (
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-12 text-center text-slate-400 space-y-3">
+                  <RefreshCw className="w-8 h-8 animate-spin mx-auto text-emerald-400" />
+                  <p>جارٍ تحميل الطلبات من Google Sheets...</p>
+                </div>
+              ) : adminOrders.length === 0 ? (
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-12 text-center text-slate-400 space-y-3">
+                  <ShoppingBag className="w-10 h-10 mx-auto text-slate-600" />
+                  <p className="text-base font-semibold text-slate-300">لا يوجد طلبات مسجلة حالياً في Google Sheets</p>
+                  <p className="text-xs text-slate-500">قم بتقديم طلب عبر نافذة المحادثة مع سناء ليتم توثيقه هنا تلقائياً.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {adminOrders.map((order) => {
+                    const isUpdating = updatingOrderId === order.id;
+
+                    // Color code status badge
+                    const getStatusColor = (st: string) => {
+                      switch (st) {
+                        case 'PENDING': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+                        case 'CONFIRMED': return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+                        case 'PREPARING': return 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+                        case 'READY_FOR_DELIVERY': return 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30';
+                        case 'OUT_FOR_DELIVERY': return 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30';
+                        case 'DELIVERED': return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+                        case 'CANCELLED': return 'bg-red-500/20 text-red-400 border-red-500/30';
+                        default: return 'bg-slate-800 text-slate-300 border-slate-700';
+                      }
+                    };
+
+                    const getPaymentColor = (pst: string) => {
+                      switch (pst) {
+                        case 'PAID': return 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+                        case 'PENDING': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
+                        case 'FAILED': return 'bg-red-500/20 text-red-400 border-red-500/30';
+                        default: return 'bg-slate-800 text-slate-400 border-slate-700';
+                      }
+                    };
+
+                    return (
+                      <div key={order.id} className="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-4 hover:border-slate-700 transition-colors">
+                        {/* Order Card Header */}
+                        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-bold text-emerald-400 text-base">{order.id}</span>
+                            <span className="text-xs text-slate-400 flex items-center gap-1">
+                              <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                              {order.createdAt ? new Date(order.createdAt).toLocaleString('ar-YE') : 'الآن'}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-bold border ${getPaymentColor(order.paymentStatus || 'UNPAID')}`}>
+                              الدفع: {order.paymentStatus || 'UNPAID'}
+                            </span>
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-bold border ${getStatusColor(order.status)}`}>
+                              الحالة: {order.status}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Customer & Address Details */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-slate-900/60 p-3.5 rounded-lg border border-slate-800/60">
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">العميل والماتصال:</span>
+                            <p className="text-slate-200 font-semibold flex items-center gap-2">
+                              <UserCheck className="w-4 h-4 text-emerald-400" />
+                              {order.customerName || 'عميل المتجر'}
+                              {order.customerPhone && (
+                                <span className="text-xs text-emerald-300 font-mono dir-ltr">({order.customerPhone})</span>
+                              )}
+                            </p>
+                            <p className="text-xs text-slate-400 mt-1">طريقة الدفع: <span className="text-slate-300 font-medium">{order.paymentMethodName || 'كاش عند الاستلام'}</span></p>
+                          </div>
+
+                          <div>
+                            <span className="text-xs text-slate-400 block mb-1">عنوان التوصيل:</span>
+                            <p className="text-slate-300 text-xs leading-relaxed">
+                              {order.deliveryAddress || 'لم يحدد بعد'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Order Items Table */}
+                        <div className="space-y-2">
+                          <span className="text-xs font-semibold text-slate-400 block">عناصر الطلب ({order.items?.length || 0}):</span>
+                          <div className="bg-slate-900 border border-slate-800/80 rounded-lg overflow-hidden">
+                            <table className="w-full text-right text-xs">
+                              <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                                <tr>
+                                  <th className="p-2.5">المنتج</th>
+                                  <th className="p-2.5">الكمية</th>
+                                  <th className="p-2.5">السعر الفردي</th>
+                                  <th className="p-2.5">الإجمالي</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                                {order.items?.map((item: any, idx: number) => (
+                                  <tr key={idx} className="hover:bg-slate-800/40">
+                                    <td className="p-2.5 font-medium">{item.productNameSnapshot}</td>
+                                    <td className="p-2.5 font-mono">{item.quantity}</td>
+                                    <td className="p-2.5 font-mono">{item.unitPriceSnapshot} YER</td>
+                                    <td className="p-2.5 font-mono text-emerald-400 font-bold">{item.totalPrice} YER</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+
+                        {/* Totals Summary */}
+                        <div className="flex flex-wrap items-center justify-between gap-4 pt-2 text-xs border-t border-slate-800/60">
+                          <div className="flex items-center gap-4 font-mono text-slate-300">
+                            <span>المجموع الفرعي: <strong className="text-white">{order.subtotal} YER</strong></span>
+                            <span>التوصيل: <strong className="text-white">{order.deliveryFee} YER</strong></span>
+                            <span className="text-sm text-emerald-400">الإجمالي النهائي: <strong className="text-emerald-400 font-bold">{order.totalAmount} YER</strong></span>
+                          </div>
+                        </div>
+
+                        {/* Admin Action Controls (Status & Payment Updates) */}
+                        <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-slate-800 bg-slate-900/80 p-3 rounded-lg">
+                          {/* Order Status Selector */}
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-bold text-slate-300">تغيير حالة الطلب:</label>
+                            <select
+                              value={order.status}
+                              disabled={isUpdating || order.status === 'CANCELLED' || order.status === 'DELIVERED'}
+                              onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value)}
+                              className="bg-slate-950 border border-slate-700 text-slate-100 text-xs rounded-lg px-3 py-1.5 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
+                            >
+                              <option value="PENDING">PENDING - قيد الانتظار</option>
+                              <option value="CONFIRMED">CONFIRMED - تم التأكيد</option>
+                              <option value="PREPARING">PREPARING - قيد التجهيز</option>
+                              <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY - جاهز للتوصيل</option>
+                              <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY - خرج للتوصيل</option>
+                              <option value="DELIVERED">DELIVERED - تم التوصيل بنجاح</option>
+                              <option value="CANCELLED">CANCELLED - إلغاء الطلب</option>
+                            </select>
+                          </div>
+
+                          {/* Payment Status Selector */}
+                          <div className="flex items-center gap-2">
+                            <label className="text-xs font-bold text-slate-300">حالة الدفع:</label>
+                            <select
+                              value={order.paymentStatus || 'UNPAID'}
+                              disabled={isUpdating}
+                              onChange={(e) => handleUpdatePaymentStatus(order.id, e.target.value)}
+                              className="bg-slate-950 border border-slate-700 text-slate-100 text-xs rounded-lg px-3 py-1.5 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
+                            >
+                              <option value="UNPAID">UNPAID - غير مدفوع</option>
+                              <option value="PENDING">PENDING - قيد التحقق</option>
+                              <option value="PAID">PAID - مدفوع</option>
+                              <option value="FAILED">FAILED - فشل الدفع</option>
+                            </select>
+
+                            {isUpdating && (
+                              <RefreshCw className="w-4 h-4 animate-spin text-emerald-400" />
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
           {/* Identity */}
           {activeCategory === 'identity' && (
             <section className="space-y-4">

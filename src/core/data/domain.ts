@@ -87,6 +87,7 @@ export interface Order {
   tenantId: string;
   storeId: string;
   customerId: string;
+  customerName?: string;
   customerPhone?: string;
   items: OrderItem[];
   subtotal?: number;

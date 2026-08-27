@@ -6,7 +6,10 @@ import { UnauthorizedDataAccessError, DataNotFoundError } from '../data/errors';
 
 export interface CreateOrderPayload {
   id?: string;
+  tenantId?: string;
+  storeId?: string;
   customerId: string;
+  customerName?: string;
   customerPhone?: string;
   items: Array<{
     productId: string;
@@ -445,11 +448,11 @@ export class OrderStore implements IOrderStore {
     return OrderStore.instance;
   }
 
-  public static resetInstance(): void {
+  public static resetInstance(overrideDelegate?: IOrderStore): void {
     if (OrderStore.instance) {
       OrderStore.instance.clear();
     }
-    OrderStore.instance = null;
+    OrderStore.instance = overrideDelegate ? new OrderStore(overrideDelegate) : null;
     PersistentOrderStore.resetInstance();
   }
 
