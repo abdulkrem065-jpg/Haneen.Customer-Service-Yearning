@@ -153,6 +153,10 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
+  // Admin Notification Alert State (CMD-092)
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
+
   const fetchOrders = async () => {
     setOrdersLoading(true);
     setErrorStatus(null);
@@ -173,6 +177,55 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
       setOrdersLoading(false);
     }
   };
+
+  const fetchNotifications = async () => {
+    try {
+      const res = await fetch(`/api/admin/notifications?tenantId=${trustedContext.tenantId}&storeId=${trustedContext.storeId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.notifications)) {
+          setNotifications(data.notifications);
+          setUnreadNotifCount(data.unreadCount || 0);
+        }
+      }
+    } catch (err) {
+      // Non-blocking background notification fetch failure
+    }
+  };
+
+  const handleMarkNotificationRead = async (notifId: string, orderId?: string) => {
+    try {
+      const res = await fetch('/api/admin/notifications/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notificationId: notifId,
+          orderId,
+          tenantId: trustedContext.tenantId,
+          storeId: trustedContext.storeId
+        })
+      });
+      if (res.ok) {
+        setNotifications(prev => prev.map(n => (n.id === notifId || n.orderId === orderId) ? { ...n, isRead: true } : n));
+        setUnreadNotifCount(prev => Math.max(0, prev - 1));
+      }
+    } catch (err) {
+      console.warn('Failed to mark notification as read:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrders();
+    fetchNotifications();
+
+    // Lightweight live polling interval for zero-cost real-time alerts
+    const interval = setInterval(() => {
+      fetchOrders();
+      fetchNotifications();
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
     setUpdatingOrderId(orderId);
@@ -533,6 +586,98 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                     <span>تحديث الطلبات من Google Sheets</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Admin Notification Alerts Section (CMD-092) */}
+              <div className="bg-slate-950 border border-emerald-500/30 rounded-xl p-4 space-y-3 shadow-xl">
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-5 h-5 text-emerald-400 animate-pulse" />
+                    <h4 className="text-md font-bold text-white">
+                      🔔 تنبيهات الطلبات الجديدة (In-App Admin Alerts)
+                    </h4>
+                    {unreadNotifCount > 0 && (
+                      <span className="bg-emerald-500 text-slate-950 px-2.5 py-0.5 rounded-full text-xs font-black animate-bounce font-mono">
+                        {unreadNotifCount} طلبات جديدة غير مقروءة
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-400 font-mono">
+                    آلية التحديث: Live Polling (0$ External Cost)
+                  </span>
+                </div>
+
+                {notifications.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-2">لا توجد تنبيهات طلبات جديدة حالياً.</p>
+                ) : (
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {notifications.map((n) => {
+                      const isUnread = !n.isRead;
+                      const matchingOrder = adminOrders.find(o => o.id === n.orderId);
+
+                      return (
+                        <div
+                          key={n.id}
+                          onClick={() => {
+                            handleMarkNotificationRead(n.id, n.orderId);
+                            if (matchingOrder) {
+                              setSelectedOrder(matchingOrder);
+                            }
+                          }}
+                          className={`p-3 rounded-lg border transition-all cursor-pointer flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                            isUnread
+                              ? 'bg-emerald-950/30 border-emerald-500/50 hover:bg-emerald-900/40 text-white'
+                              : 'bg-slate-900/60 border-slate-800/80 hover:bg-slate-800/60 text-slate-300'
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-sm text-emerald-300">{n.title || `🔔 طلب جديد - ${n.orderId}`}</span>
+                              {isUnread ? (
+                                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] px-2 py-0.5 rounded font-bold">
+                                  UNREAD (غير مقروء)
+                                </span>
+                              ) : (
+                                <span className="bg-slate-800 text-slate-400 text-[10px] px-2 py-0.5 rounded font-semibold">
+                                  READ (تمت المراجعة)
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-300 line-clamp-2 whitespace-pre-line font-mono">
+                              {n.content}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                            {isUnread && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleMarkNotificationRead(n.id, n.orderId);
+                                }}
+                                className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1 rounded-md border border-slate-700 transition-colors"
+                              >
+                                تعليم كمقروء
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleMarkNotificationRead(n.id, n.orderId);
+                                if (matchingOrder) {
+                                  setSelectedOrder(matchingOrder);
+                                }
+                              }}
+                              className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-md font-medium transition-colors"
+                            >
+                              عرض تفاصيل الطلب
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* Summary Stats Badges */}

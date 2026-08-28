@@ -277,9 +277,9 @@ ${this.formatCartItemsList(state.cart)}
         : (createdOrder.customerPhone || 'غير محدد');
 
       let notificationMsg = 'تم تسجيل طلبك، وجارٍ إرسال الإشعار للإدارة.';
-      if (notifResult?.status === 'SENT') {
-        notificationMsg = 'تم استلام طلبك وتم إشعار الإدارة بنجاح.';
-      } else if (notifResult?.status === 'FAILED' || (!notifResult && true)) {
+      if (notifResult?.status === 'SENT' || notifResult?.status === 'PENDING') {
+        notificationMsg = 'تم تسجيل طلبك بنجاح، وتم إشعار الإدارة.';
+      } else if (notifResult?.status === 'FAILED' || !notifResult) {
         notificationMsg = 'تم تسجيل طلبك، لكن تعذر إرسال إشعار تلقائي للإدارة حالياً.';
       }
 

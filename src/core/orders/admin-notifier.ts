@@ -13,6 +13,7 @@ export interface AdminNotificationRecord {
   destination?: string;
   channel?: string;
   status: 'PENDING' | 'SENT' | 'FAILED';
+  isRead?: boolean;
   createdAt: Date;
 }
 
@@ -167,6 +168,7 @@ ${itemsSummary}
       destination,
       channel: this.channelAdapter ? 'external' : 'durable_store',
       status: notificationStatus,
+      isRead: false,
       createdAt: new Date()
     };
 
@@ -184,6 +186,73 @@ ${itemsSummary}
     return this.notifications.filter(
       n => n.tenantId === context.tenantId && n.storeId === context.storeId
     );
+  }
+
+  public getUnreadCount(context: DataOperationContext): number {
+    return this.getNotifications(context).filter(n => !n.isRead).length;
+  }
+
+  public markAsRead(idOrOrderId: string, context: DataOperationContext): boolean {
+    let found = false;
+    this.notifications.forEach(n => {
+      if ((n.id === idOrOrderId || n.orderId === idOrOrderId) && n.tenantId === context.tenantId && n.storeId === context.storeId) {
+        n.isRead = true;
+        found = true;
+      }
+    });
+    if (found) {
+      this.saveToDisk();
+    }
+    return found;
+  }
+
+  public syncFromOrders(orders: Order[], context: DataOperationContext): number {
+    let addedCount = 0;
+    const storeOrders = orders.filter(o => o.tenantId === context.tenantId && o.storeId === context.storeId);
+    for (const order of storeOrders) {
+      const exists = this.notifications.some(
+        n => n.orderId === order.id && n.tenantId === context.tenantId && n.storeId === context.storeId
+      );
+      if (!exists) {
+        const customerPhoneText = order.customerPhone ? order.customerPhone : 'غير محدد';
+        const itemsSummary = (order.items || [])
+          .map(i => `- ${i.productNameSnapshot || i.productName} (كمية: ${i.quantity}) - السعر الفردي: ${i.unitPriceSnapshot} ${order.currency || 'YER'} - الإجمالي: ${i.totalPrice || (i.quantity * i.unitPriceSnapshot)} ${order.currency || 'YER'}`)
+          .join('\n');
+        
+        const rawContent = `إشعار طلب جديد للإدارة:
+رقم الطلب: ${order.id}
+هاتف العميل: ${customerPhoneText}
+تاريخ الطلب: ${order.createdAt ? new Date(order.createdAt).toISOString() : new Date().toISOString()}
+المنتجات والكميات:
+${itemsSummary}
+المجموع الجزئي: ${order.subtotal || 0} ${order.currency || 'YER'}
+رسوم التوصيل: ${order.deliveryFee || 0} ${order.currency || 'YER'}
+الإجمالي الكلي: ${order.totalAmount || 0} ${order.currency || 'YER'}
+طريقة الدفع: ${order.paymentMethodName || order.paymentMethodId || 'غير محدد'}
+حالة الدفع: ${order.paymentStatus || 'UNPAID'}
+عنوان التوصيل: ${order.deliveryAddress || 'لم يحدد'}
+حالة الطلب: ${order.status}`;
+
+        const notificationId = `notif-sync-${order.id}`;
+        const record: AdminNotificationRecord = {
+          id: notificationId,
+          orderId: order.id,
+          tenantId: context.tenantId,
+          storeId: context.storeId,
+          title: `طلب جديد - ${order.id}`,
+          content: this.sanitizeContent(rawContent),
+          status: 'PENDING',
+          isRead: false,
+          createdAt: order.createdAt ? new Date(order.createdAt) : new Date()
+        };
+        this.notifications.push(record);
+        addedCount++;
+      }
+    }
+    if (addedCount > 0) {
+      this.saveToDisk();
+    }
+    return addedCount;
   }
 
   public clear(): void {

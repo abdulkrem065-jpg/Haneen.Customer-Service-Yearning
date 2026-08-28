@@ -389,12 +389,57 @@ async function startServer() {
 
   app.get('/api/admin/notifications', async (req, res) => {
     try {
+      const tenantId = (req.query.tenantId as string) || CANONICAL_TENANT_ID;
+      const storeId = (req.query.storeId as string) || CANONICAL_STORE_ID;
+
+      if (tenantId !== CANONICAL_TENANT_ID || storeId !== CANONICAL_STORE_ID) {
+        return res.status(403).json({ success: false, error: 'Unauthorized tenant or store access' });
+      }
+
+      const context = { tenantId, storeId };
       const { AdminNotifier } = await import('./src/core/orders/admin-notifier.js');
+      const { OrderStore } = await import('./src/core/orders/order-store.js');
       const notifier = AdminNotifier.getInstance();
-      const notifications = notifier.getNotifications({ tenantId: CANONICAL_TENANT_ID, storeId: CANONICAL_STORE_ID });
-      res.status(200).json({ success: true, count: notifications.length, notifications });
+      const store = OrderStore.getInstance();
+
+      // Sync persistent orders into notification records (restart survival)
+      try {
+        const orders = await store.getOrders(context);
+        notifier.syncFromOrders(orders, context);
+      } catch (err) {
+        console.warn('[server] Non-blocking order sync warning:', err);
+      }
+
+      const notifications = notifier.getNotifications(context);
+      const unreadCount = notifier.getUnreadCount(context);
+      res.status(200).json({ success: true, count: notifications.length, unreadCount, notifications });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || 'Failed to fetch notifications' });
+    }
+  });
+
+  app.post('/api/admin/notifications/mark-read', async (req, res) => {
+    try {
+      const { notificationId, orderId, id, tenantId = CANONICAL_TENANT_ID, storeId = CANONICAL_STORE_ID } = req.body || {};
+
+      if (tenantId !== CANONICAL_TENANT_ID || storeId !== CANONICAL_STORE_ID) {
+        return res.status(403).json({ success: false, error: 'Unauthorized tenant or store access' });
+      }
+
+      const targetId = notificationId || id || orderId;
+      if (!targetId) {
+        return res.status(400).json({ success: false, error: 'Missing notificationId or orderId' });
+      }
+
+      const context = { tenantId, storeId };
+      const { AdminNotifier } = await import('./src/core/orders/admin-notifier.js');
+      const notifier = AdminNotifier.getInstance();
+      const updated = notifier.markAsRead(targetId, context);
+      const unreadCount = notifier.getUnreadCount(context);
+
+      res.status(200).json({ success: true, updated, unreadCount, count: notifier.getNotifications(context).length });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to mark notification as read' });
     }
   });
 
