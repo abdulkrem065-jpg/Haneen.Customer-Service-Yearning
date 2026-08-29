@@ -157,7 +157,7 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
 
-  const fetchOrders = async () => {
+  const fetchOrders = async (keepSelectedOrder = true) => {
     setOrdersLoading(true);
     setErrorStatus(null);
     try {
@@ -166,6 +166,12 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
         const data = await res.json();
         if (data.success && Array.isArray(data.orders)) {
           setAdminOrders(data.orders);
+          if (keepSelectedOrder && selectedOrder) {
+            const updated = data.orders.find((o: any) => o.id === selectedOrder.id);
+            if (updated) {
+              setSelectedOrder(updated);
+            }
+          }
         }
       } else {
         const errData = await res.json();
@@ -215,12 +221,12 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
   };
 
   useEffect(() => {
-    fetchOrders();
+    fetchOrders(true);
     fetchNotifications();
 
-    // Lightweight live polling interval for zero-cost real-time alerts
+    // CMD-092-FIX: Lightweight background check ONLY for notifications
+    // NO automatic re-fetching of adminOrders list to avoid disrupting open modal / details view
     const interval = setInterval(() => {
-      fetchOrders();
       fetchNotifications();
     }, 8000);
 
@@ -824,9 +830,9 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                                 {order.items?.map((item: any, idx: number) => (
                                   <tr key={idx} className="hover:bg-slate-800/40">
-                                    <td className="p-2.5 font-medium">{item.productNameSnapshot}</td>
+                                    <td className="p-2.5 font-medium">{item.productNameSnapshot || item.productName || item.productId || 'منتج غير محدد'}</td>
                                     <td className="p-2.5 font-mono">{item.quantity}</td>
-                                    <td className="p-2.5 font-mono">{item.unitPriceSnapshot} YER</td>
+                                    <td className="p-2.5 font-mono">{item.unitPriceSnapshot ?? item.unitPrice ?? 0} YER</td>
                                     <td className="p-2.5 font-mono text-emerald-400 font-bold">{item.totalPrice} YER</td>
                                   </tr>
                                 ))}
@@ -842,6 +848,14 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                             <span>التوصيل: <strong className="text-white">{order.deliveryFee} YER</strong></span>
                             <span className="text-sm text-emerald-400">الإجمالي النهائي: <strong className="text-emerald-400 font-bold">{order.totalAmount} YER</strong></span>
                           </div>
+
+                          <button
+                            onClick={() => setSelectedOrder(order)}
+                            className="bg-slate-800 hover:bg-slate-700 text-emerald-400 px-3 py-1.5 rounded-lg border border-slate-700 font-semibold text-xs transition-colors flex items-center gap-1.5"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>فتح التفاصيل</span>
+                          </button>
                         </div>
 
                         {/* Admin Action Controls (Status & Payment Updates) */}
@@ -888,6 +902,125 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {/* Selected Order Detail Modal (CMD-092-FIX) */}
+              {selectedOrder && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+                  <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-2xl w-full p-6 space-y-6 shadow-2xl relative max-h-[90vh] overflow-y-auto text-right dir-rtl">
+                    {/* Modal Header */}
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+                      <div>
+                        <h3 className="text-lg font-bold text-emerald-400 font-mono">تفاصيل الطلب: {selectedOrder.id}</h3>
+                        <p className="text-xs text-slate-400 mt-1">تاريخ الإنشاء: {selectedOrder.createdAt ? new Date(selectedOrder.createdAt).toLocaleString('ar-YE') : 'غير محدد'}</p>
+                      </div>
+                      <button
+                        onClick={() => setSelectedOrder(null)}
+                        className="text-slate-400 hover:text-white bg-slate-800 p-2 rounded-lg transition-colors"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Customer & Delivery Info */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs bg-slate-950 p-4 rounded-xl border border-slate-800">
+                      <div>
+                        <span className="text-slate-400 block mb-1 font-semibold">بيانات العميل:</span>
+                        <p className="font-semibold text-slate-100 text-sm">{selectedOrder.customerName || 'عميل المتجر'}</p>
+                        <p className="text-slate-300 mt-1 font-mono">الهاتف: {selectedOrder.customerPhone || 'غير محدد'}</p>
+                        <p className="text-slate-400 mt-1">طريقة الدفع: <span className="text-slate-200">{selectedOrder.paymentMethodName || 'كاش عند الاستلام'}</span></p>
+                      </div>
+                      <div>
+                        <span className="text-slate-400 block mb-1 font-semibold">عنوان التوصيل والحالة:</span>
+                        <p className="text-slate-200 text-xs leading-relaxed">{selectedOrder.deliveryAddress || 'لم يحدد بعد'}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">حالة الطلب: {selectedOrder.status}</span>
+                          <span className="text-xs px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">الدفع: {selectedOrder.paymentStatus || 'UNPAID'}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Items List */}
+                    <div className="space-y-3">
+                      <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">الأصناف المطلوبة ({selectedOrder.items?.length || 0}):</h4>
+                      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800/80">
+                        {selectedOrder.items?.map((item: any, idx: number) => {
+                          const itemName = item.productNameSnapshot || item.productName || item.productId || 'منتج غير محدد';
+                          const unitPrice = item.unitPriceSnapshot ?? item.unitPrice ?? 0;
+                          const qty = item.quantity ?? 1;
+                          const total = item.totalPrice ?? (unitPrice * qty);
+
+                          return (
+                            <div key={idx} className="p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-900/50">
+                              <div>
+                                <p className="font-bold text-slate-100 text-sm">{itemName}</p>
+                                <p className="text-[11px] text-slate-400 mt-0.5">رمز المنتج (ID): <span className="font-mono text-slate-300">{item.productId}</span></p>
+                              </div>
+                              <div className="flex items-center gap-4 text-right sm:text-left font-mono">
+                                <div>
+                                  <span className="text-[10px] text-slate-400 block">الكمية</span>
+                                  <span className="text-slate-200 font-bold">{qty}</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 block">سعر الوحدة</span>
+                                  <span className="text-slate-300">{unitPrice} YER</span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] text-slate-400 block">الإجمالي</span>
+                                  <span className="text-emerald-400 font-bold">{total} YER</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Totals Summary */}
+                    <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2 text-xs font-mono">
+                      <div className="flex justify-between text-slate-300">
+                        <span>المجموع الفرعي (Subtotal):</span>
+                        <span>{selectedOrder.subtotal} YER</span>
+                      </div>
+                      <div className="flex justify-between text-slate-300">
+                        <span>رسوم التوصيل (Delivery Fee):</span>
+                        <span>{selectedOrder.deliveryFee} YER</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-bold text-emerald-400 border-t border-slate-800 pt-2 mt-1">
+                        <span>الإجمالي النهائي (Total Amount):</span>
+                        <span>{selectedOrder.totalAmount} YER</span>
+                      </div>
+                    </div>
+
+                    {/* Modal Controls */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <label className="text-xs font-bold text-slate-300">تحديث حالة الطلب:</label>
+                        <select
+                          value={selectedOrder.status}
+                          disabled={updatingOrderId === selectedOrder.id}
+                          onChange={(e) => handleUpdateOrderStatus(selectedOrder.id, e.target.value)}
+                          className="bg-slate-950 border border-slate-700 text-slate-100 text-xs rounded-lg px-3 py-1.5 focus:border-emerald-500 focus:outline-none"
+                        >
+                          <option value="PENDING">PENDING - قيد الانتظار</option>
+                          <option value="CONFIRMED">CONFIRMED - تم التأكيد</option>
+                          <option value="PREPARING">PREPARING - قيد التجهيز</option>
+                          <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY - جاهز للتوصيل</option>
+                          <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY - خرج للتوصيل</option>
+                          <option value="DELIVERED">DELIVERED - تم التوصيل بنجاح</option>
+                          <option value="CANCELLED">CANCELLED - إلغاء الطلب</option>
+                        </select>
+                      </div>
+
+                      <button
+                        onClick={() => setSelectedOrder(null)}
+                        className="bg-slate-800 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg text-xs font-semibold transition-colors"
+                      >
+                        إغلاق التفاصيل
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </section>

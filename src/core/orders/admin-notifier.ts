@@ -173,6 +173,25 @@ ${itemsSummary}
     };
 
     try {
+      const existingIndex = this.notifications.findIndex(n =>
+        n.orderId === order.id &&
+        n.tenantId === context.tenantId &&
+        n.storeId === context.storeId
+      );
+
+      if (existingIndex >= 0) {
+        this.notifications[existingIndex] = {
+          ...this.notifications[existingIndex],
+          title: `طلب جديد - ${order.id}`,
+          content,
+          destination,
+          status: notificationStatus,
+          createdAt: new Date()
+        };
+        this.saveToDisk();
+        return { success: notificationStatus !== 'FAILED', notificationId: this.notifications[existingIndex].id, status: notificationStatus };
+      }
+
       this.notifications.push(record);
       this.saveToDisk();
       return { success: notificationStatus !== 'FAILED', notificationId, status: notificationStatus };
