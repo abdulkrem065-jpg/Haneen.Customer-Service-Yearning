@@ -36,6 +36,7 @@ describe('CMD-092-FIX: Admin Alert UX & Order Item Name Visibility Test Suite', 
     id,
     tenantId: canonicalContext.tenantId,
     storeId: canonicalContext.storeId,
+    customerId: 'c-sample',
     subtotal: 1200,
     deliveryFee: 1000,
     totalAmount: 2200,
@@ -53,12 +54,13 @@ describe('CMD-092-FIX: Admin Alert UX & Order Item Name Visibility Test Suite', 
         productId: 'prd-001',
         productNameSnapshot: 'زبادي المراعي 500 مل',
         unitPriceSnapshot: 600,
+        unitPrice: 600,
         quantity: 2,
-        totalPrice: 1200,
-        createdAt: new Date()
+        totalPrice: 1200
       }
     ],
-    createdAt: new Date()
+    createdAt: new Date(),
+    updatedAt: new Date()
   });
 
   it('1. New order alert without list reload: Notification check returns new notification without re-fetching order list', async () => {

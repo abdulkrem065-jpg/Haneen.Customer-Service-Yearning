@@ -359,7 +359,8 @@ export class GoogleSheetsOrderStore implements IOrderStore {
   public async updateOrderStatus(
     orderId: string,
     newStatus: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_DELIVERY' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED',
-    context: DataOperationContext
+    context: DataOperationContext,
+    cancellationDetails?: { cancellationReason?: string; cancelledBy?: string; cancelledAt?: Date }
   ): Promise<Order> {
     await this.ensureTabsExist();
 
@@ -401,6 +402,15 @@ export class GoogleSheetsOrderStore implements IOrderStore {
     }
 
     existingOrder.status = newStatus;
+    if (newStatus === 'CANCELLED' && cancellationDetails) {
+      if (cancellationDetails.cancellationReason) {
+        existingOrder.cancellationReason = cancellationDetails.cancellationReason;
+      }
+      if (cancellationDetails.cancelledBy) {
+        existingOrder.cancelledBy = cancellationDetails.cancelledBy;
+      }
+      existingOrder.cancelledAt = cancellationDetails.cancelledAt || new Date();
+    }
     existingOrder.updatedAt = new Date();
 
     const updatedRowValues = this.orderMapper.toRow(existingOrder, orderHeaderMap);

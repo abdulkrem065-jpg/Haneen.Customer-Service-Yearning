@@ -38,7 +38,8 @@ export interface IOrderStore {
   updateOrderStatus(
     orderId: string,
     newStatus: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_DELIVERY' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED',
-    context: DataOperationContext
+    context: DataOperationContext,
+    cancellationDetails?: { cancellationReason?: string; cancelledBy?: string; cancelledAt?: Date }
   ): Promise<Order>;
   updatePaymentStatus(
     orderId: string,
@@ -169,6 +170,7 @@ export class PersistentOrderStore implements IOrderStore {
       tenantId: context.tenantId,
       storeId: context.storeId,
       customerId: payload.customerId,
+      customerName: payload.customerName || '',
       customerPhone: payload.customerPhone || '',
       items: orderItems,
       subtotal: payload.subtotal,
@@ -226,7 +228,8 @@ export class PersistentOrderStore implements IOrderStore {
   public async updateOrderStatus(
     orderId: string,
     newStatus: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_DELIVERY' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED',
-    context: DataOperationContext
+    context: DataOperationContext,
+    cancellationDetails?: { cancellationReason?: string; cancelledBy?: string; cancelledAt?: Date }
   ): Promise<Order> {
     const order = await this.getOrderById(orderId, context);
     if (!order) {
@@ -242,6 +245,15 @@ export class PersistentOrderStore implements IOrderStore {
     }
 
     order.status = newStatus;
+    if (newStatus === 'CANCELLED' && cancellationDetails) {
+      if (cancellationDetails.cancellationReason) {
+        order.cancellationReason = cancellationDetails.cancellationReason;
+      }
+      if (cancellationDetails.cancelledBy) {
+        order.cancelledBy = cancellationDetails.cancelledBy;
+      }
+      order.cancelledAt = cancellationDetails.cancelledAt || new Date();
+    }
     order.updatedAt = new Date();
     this.orders.set(orderId, order);
     this.saveToDisk();
@@ -331,6 +343,7 @@ export class InMemoryOrderStore implements IOrderStore {
       tenantId: context.tenantId,
       storeId: context.storeId,
       customerId: payload.customerId,
+      customerName: payload.customerName || '',
       customerPhone: payload.customerPhone || '',
       items: orderItems,
       subtotal: payload.subtotal,
@@ -387,7 +400,8 @@ export class InMemoryOrderStore implements IOrderStore {
   public async updateOrderStatus(
     orderId: string,
     newStatus: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_DELIVERY' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED',
-    context: DataOperationContext
+    context: DataOperationContext,
+    cancellationDetails?: { cancellationReason?: string; cancelledBy?: string; cancelledAt?: Date }
   ): Promise<Order> {
     const order = await this.getOrderById(orderId, context);
     if (!order) {
@@ -403,6 +417,15 @@ export class InMemoryOrderStore implements IOrderStore {
     }
 
     order.status = newStatus;
+    if (newStatus === 'CANCELLED' && cancellationDetails) {
+      if (cancellationDetails.cancellationReason) {
+        order.cancellationReason = cancellationDetails.cancellationReason;
+      }
+      if (cancellationDetails.cancelledBy) {
+        order.cancelledBy = cancellationDetails.cancelledBy;
+      }
+      order.cancelledAt = cancellationDetails.cancelledAt || new Date();
+    }
     order.updatedAt = new Date();
     this.orders.set(orderId, order);
     return order;
@@ -487,9 +510,10 @@ export class OrderStore implements IOrderStore {
   public async updateOrderStatus(
     orderId: string,
     newStatus: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY_FOR_DELIVERY' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'CANCELLED',
-    context: DataOperationContext
+    context: DataOperationContext,
+    cancellationDetails?: { cancellationReason?: string; cancelledBy?: string; cancelledAt?: Date }
   ): Promise<Order> {
-    return this.delegate.updateOrderStatus(orderId, newStatus, context);
+    return this.delegate.updateOrderStatus(orderId, newStatus, context, cancellationDetails);
   }
 
   public async updatePaymentStatus(

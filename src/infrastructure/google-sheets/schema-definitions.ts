@@ -55,7 +55,7 @@ export const CanonicalSchemas: Record<string, ISchemaDefinition> = {
     scope: 'STORE',
     primaryKey: 'id',
     requiredHeaders: ['id', 'tenantId', 'storeId', 'customerId', 'totalAmount', 'currency', 'status', 'createdAt', 'updatedAt'],
-    optionalHeaders: ['subtotal', 'deliveryFee', 'paymentMethodId', 'paymentMethodName', 'paymentStatus', 'deliveryAddress', 'customerName', 'customerPhone', 'notes'],
+    optionalHeaders: ['subtotal', 'deliveryFee', 'paymentMethodId', 'paymentMethodName', 'paymentStatus', 'deliveryAddress', 'customerName', 'customerPhone', 'notes', 'cancellationReason', 'cancelledBy', 'cancelledAt'],
     foreignKeys: ['tenantId', 'storeId', 'customerId']
   },
   order_items: {

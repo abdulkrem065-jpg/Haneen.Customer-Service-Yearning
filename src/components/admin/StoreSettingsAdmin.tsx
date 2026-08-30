@@ -23,6 +23,7 @@ import {
   Check,
   Save,
   ShoppingBag,
+  Search,
   Package,
   Eye,
   UserCheck,
@@ -153,9 +154,48 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
+  // CMD-094 Admin Order Operations State
+  const [activeOrderTab, setActiveOrderTab] = useState<'active' | 'historical'>('active');
+  const [orderSearchTerm, setOrderSearchTerm] = useState('');
+  const [orderStatusFilter, setOrderStatusFilter] = useState('ALL');
+  const [catalogProducts, setCatalogProducts] = useState<any[]>([]);
+  const [cancellationModalOrder, setCancellationModalOrder] = useState<any | null>(null);
+  const [cancellationReasonInput, setCancellationReasonInput] = useState('');
+  const [cancellationModalError, setCancellationModalError] = useState<string | null>(null);
+
   // Admin Notification Alert State (CMD-092)
   const [notifications, setNotifications] = useState<any[]>([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState<number>(0);
+
+  const fetchCatalogProducts = async () => {
+    try {
+      const res = await fetch(`/api/admin/products?tenantId=${trustedContext.tenantId}&storeId=${trustedContext.storeId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.products)) {
+          setCatalogProducts(data.products);
+        }
+      }
+    } catch {
+      // Non-blocking
+    }
+  };
+
+  const resolveItemName = (item: any) => {
+    if (item?.productNameSnapshot && item.productNameSnapshot.trim() && !item.productNameSnapshot.startsWith('prd-')) {
+      return item.productNameSnapshot;
+    }
+    if (item?.productName && item.productName.trim() && !item.productName.startsWith('prd-')) {
+      return item.productName;
+    }
+    const pid = item?.productId;
+    if (pid) {
+      const matched = catalogProducts.find((p: any) => p.id === pid);
+      if (matched && matched.name) return matched.name;
+      return `${pid} (غير متوفر بالفهرس)`;
+    }
+    return 'منتج غير محدد';
+  };
 
   const fetchOrders = async (keepSelectedOrder = true) => {
     setOrdersLoading(true);
@@ -223,6 +263,7 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
   useEffect(() => {
     fetchOrders(true);
     fetchNotifications();
+    fetchCatalogProducts();
 
     // CMD-092-FIX: Lightweight background check ONLY for notifications
     // NO automatic re-fetching of adminOrders list to avoid disrupting open modal / details view
@@ -233,7 +274,17 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
     return () => clearInterval(interval);
   }, []);
 
-  const handleUpdateOrderStatus = async (orderId: string, newStatus: string) => {
+  const handleUpdateOrderStatus = async (orderId: string, newStatus: string, cancellationReason?: string) => {
+    if (newStatus === 'CANCELLED' && !cancellationReason) {
+      const targetOrder = adminOrders.find(o => o.id === orderId);
+      if (targetOrder) {
+        setCancellationModalOrder(targetOrder);
+        setCancellationReasonInput('');
+        setCancellationModalError(null);
+      }
+      return;
+    }
+
     setUpdatingOrderId(orderId);
     setErrorStatus(null);
     setSaveStatus(null);
@@ -245,7 +296,10 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
           orderId,
           status: newStatus,
           tenantId: trustedContext.tenantId,
-          storeId: trustedContext.storeId
+          storeId: trustedContext.storeId,
+          cancellationReason: cancellationReason || undefined,
+          cancelledBy: 'ADMIN',
+          cancelledAt: new Date().toISOString()
         })
       });
       const data = await res.json();
@@ -263,6 +317,20 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
     } finally {
       setUpdatingOrderId(null);
     }
+  };
+
+  const handleConfirmCancelOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancellationModalOrder) return;
+    if (!cancellationReasonInput.trim()) {
+      setCancellationModalError('يرجى تحديد سبب الإلغاء قبل المتابعة.');
+      return;
+    }
+
+    const targetId = cancellationModalOrder.id;
+    const reason = cancellationReasonInput.trim();
+    setCancellationModalOrder(null);
+    await handleUpdateOrderStatus(targetId, 'CANCELLED', reason);
   };
 
   const handleUpdatePaymentStatus = async (orderId: string, newPaymentStatus: string) => {
@@ -730,6 +798,92 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                 </div>
               </div>
 
+              {/* CMD-094 Active vs Historical Tabs & Search/Filter Bar */}
+              <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setActiveOrderTab('active')}
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                        activeOrderTab === 'active'
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
+                          : 'bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      <ShoppingBag className="w-4 h-4" />
+                      <span>الطلبات النشطة</span>
+                      <span className="bg-slate-950/60 px-2 py-0.5 rounded text-[11px] font-mono">
+                        {adminOrders.filter(o => ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_DELIVERY', 'OUT_FOR_DELIVERY'].includes(o.status)).length}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveOrderTab('historical')}
+                      className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                        activeOrderTab === 'historical'
+                          ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/30'
+                          : 'bg-slate-900 text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                      }`}
+                    >
+                      <History className="w-4 h-4" />
+                      <span>سجل الطلبات التاريخية</span>
+                      <span className="bg-slate-950/60 px-2 py-0.5 rounded text-[11px] font-mono">
+                        {adminOrders.filter(o => ['DELIVERED', 'CANCELLED'].includes(o.status)).length}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="text-xs text-slate-400 font-mono">
+                    عرض {adminOrders.filter((order) => {
+                      const isActive = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_DELIVERY', 'OUT_FOR_DELIVERY'].includes(order.status);
+                      if (activeOrderTab === 'active' && !isActive) return false;
+                      if (activeOrderTab === 'historical' && isActive) return false;
+                      if (orderStatusFilter !== 'ALL' && order.status !== orderStatusFilter) return false;
+                      if (orderSearchTerm.trim()) {
+                        const q = orderSearchTerm.trim().toLowerCase();
+                        const mId = (order.id || '').toLowerCase().includes(q);
+                        const mName = (order.customerName || '').toLowerCase().includes(q);
+                        const mPhone = (order.customerPhone || '').toLowerCase().includes(q);
+                        if (!mId && !mName && !mPhone) return false;
+                      }
+                      return true;
+                    }).length} من إجمالي {adminOrders.length} طلب
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2 relative">
+                    <Search className="w-4 h-4 absolute right-3 top-3 text-slate-500" />
+                    <input
+                      type="text"
+                      value={orderSearchTerm}
+                      onChange={(e) => setOrderSearchTerm(e.target.value)}
+                      placeholder="بحث برقم الطلب (ORD-...)، اسم العميل، أو رقم الهاتف..."
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg pr-9 pl-3 py-2 text-xs text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <select
+                      value={orderStatusFilter}
+                      onChange={(e) => setOrderStatusFilter(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-200 focus:border-emerald-500 focus:outline-none"
+                    >
+                      <option value="ALL">جميع الحالات التابعة للتبويب</option>
+                      <option value="PENDING">PENDING - قيد الانتظار</option>
+                      <option value="CONFIRMED">CONFIRMED - مؤكد</option>
+                      <option value="PREPARING">PREPARING - قيد التجهيز</option>
+                      <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY - جاهز للتوصيل</option>
+                      <option value="OUT_FOR_DELIVERY">OUT_FOR_DELIVERY - خرج للتوصيل</option>
+                      <option value="DELIVERED">DELIVERED - تم التوصيل</option>
+                      <option value="CANCELLED">CANCELLED - ملغي</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
               {/* Orders List */}
               {ordersLoading ? (
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-12 text-center text-slate-400 space-y-3">
@@ -744,7 +898,22 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {adminOrders.map((order) => {
+                  {adminOrders
+                    .filter((order) => {
+                      const isActive = ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_DELIVERY', 'OUT_FOR_DELIVERY'].includes(order.status);
+                      if (activeOrderTab === 'active' && !isActive) return false;
+                      if (activeOrderTab === 'historical' && isActive) return false;
+                      if (orderStatusFilter !== 'ALL' && order.status !== orderStatusFilter) return false;
+                      if (orderSearchTerm.trim()) {
+                        const q = orderSearchTerm.trim().toLowerCase();
+                        const mId = (order.id || '').toLowerCase().includes(q);
+                        const mName = (order.customerName || '').toLowerCase().includes(q);
+                        const mPhone = (order.customerPhone || '').toLowerCase().includes(q);
+                        if (!mId && !mName && !mPhone) return false;
+                      }
+                      return true;
+                    })
+                    .map((order) => {
                     const isUpdating = updatingOrderId === order.id;
 
                     // Color code status badge
@@ -795,7 +964,7 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                         {/* Customer & Address Details */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm bg-slate-900/60 p-3.5 rounded-lg border border-slate-800/60">
                           <div>
-                            <span className="text-xs text-slate-400 block mb-1">العميل والماتصال:</span>
+                            <span className="text-xs text-slate-400 block mb-1">العميل والاتصال:</span>
                             <p className="text-slate-200 font-semibold flex items-center gap-2">
                               <UserCheck className="w-4 h-4 text-emerald-400" />
                               {order.customerName || 'عميل المتجر'}
@@ -814,6 +983,23 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                           </div>
                         </div>
 
+                        {/* Cancellation Reason Audit Block if Cancelled */}
+                        {(order.status === 'CANCELLED' || order.cancellationReason) && (
+                          <div className="bg-red-950/40 border border-red-500/30 p-3 rounded-lg text-xs space-y-1">
+                            <p className="text-red-300 font-bold flex items-center gap-1.5">
+                              <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                              <span>سبب الإلغاء / الرفض:</span>
+                              <span className="text-white font-medium">{order.cancellationReason || 'غير محدد'}</span>
+                            </p>
+                            <div className="flex items-center gap-4 text-slate-400 text-[11px] font-mono">
+                              <span>بواسطة: {order.cancelledBy || 'ADMIN'}</span>
+                              {order.cancelledAt && (
+                                <span>التاريخ: {new Date(order.cancelledAt).toLocaleString('ar-YE')}</span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         {/* Order Items Table */}
                         <div className="space-y-2">
                           <span className="text-xs font-semibold text-slate-400 block">عناصر الطلب ({order.items?.length || 0}):</span>
@@ -830,7 +1016,7 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                               <tbody className="divide-y divide-slate-800/60 text-slate-200">
                                 {order.items?.map((item: any, idx: number) => (
                                   <tr key={idx} className="hover:bg-slate-800/40">
-                                    <td className="p-2.5 font-medium">{item.productNameSnapshot || item.productName || item.productId || 'منتج غير محدد'}</td>
+                                    <td className="p-2.5 font-medium">{resolveItemName(item)}</td>
                                     <td className="p-2.5 font-mono">{item.quantity}</td>
                                     <td className="p-2.5 font-mono">{item.unitPriceSnapshot ?? item.unitPrice ?? 0} YER</td>
                                     <td className="p-2.5 font-mono text-emerald-400 font-bold">{item.totalPrice} YER</td>
@@ -865,7 +1051,7 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                             <label className="text-xs font-bold text-slate-300">تغيير حالة الطلب:</label>
                             <select
                               value={order.status}
-                              disabled={isUpdating || order.status === 'CANCELLED' || order.status === 'DELIVERED'}
+                              disabled={isUpdating}
                               onChange={(e) => handleUpdateOrderStatus(order.id, e.target.value)}
                               className="bg-slate-950 border border-slate-700 text-slate-100 text-xs rounded-lg px-3 py-1.5 focus:border-emerald-500 focus:outline-none disabled:opacity-50"
                             >
@@ -941,12 +1127,29 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                       </div>
                     </div>
 
+                    {/* Cancellation Audit Block in Modal if Cancelled */}
+                    {(selectedOrder.status === 'CANCELLED' || selectedOrder.cancellationReason) && (
+                      <div className="bg-red-950/40 border border-red-500/30 p-3.5 rounded-xl text-xs space-y-1.5">
+                        <p className="text-red-300 font-bold flex items-center gap-1.5">
+                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                          <span>سبب الإلغاء / الرفض:</span>
+                          <span className="text-white font-medium">{selectedOrder.cancellationReason || 'غير محدد'}</span>
+                        </p>
+                        <div className="flex items-center gap-4 text-slate-400 text-[11px] font-mono">
+                          <span>تم بواسطة: {selectedOrder.cancelledBy || 'ADMIN'}</span>
+                          {selectedOrder.cancelledAt && (
+                            <span>التاريخ: {new Date(selectedOrder.cancelledAt).toLocaleString('ar-YE')}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Items List */}
                     <div className="space-y-3">
                       <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">الأصناف المطلوبة ({selectedOrder.items?.length || 0}):</h4>
                       <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800/80">
                         {selectedOrder.items?.map((item: any, idx: number) => {
-                          const itemName = item.productNameSnapshot || item.productName || item.productId || 'منتج غير محدد';
+                          const itemName = resolveItemName(item);
                           const unitPrice = item.unitPriceSnapshot ?? item.unitPrice ?? 0;
                           const qty = item.quantity ?? 1;
                           const total = item.totalPrice ?? (unitPrice * qty);
@@ -1020,6 +1223,56 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
                         إغلاق التفاصيل
                       </button>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* CMD-094 Cancellation Reason Modal */}
+              {cancellationModalOrder && (
+                <div className="fixed inset-0 z-[60] bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-slate-900 border border-red-500/40 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl relative text-right dir-rtl">
+                    <h3 className="text-base font-bold text-red-400 flex items-center gap-2">
+                      <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+                      <span>إلغاء الطلب: {cancellationModalOrder.id}</span>
+                    </h3>
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      يرجى تحديد سبب أو مبرر إلغاء الطلب ليتم توثيقه وحفظه في سجلات المتجر وGoogle Sheets.
+                    </p>
+
+                    {cancellationModalError && (
+                      <p className="text-xs text-red-400 bg-red-950/50 p-2 rounded border border-red-800">
+                        {cancellationModalError}
+                      </p>
+                    )}
+
+                    <form onSubmit={handleConfirmCancelOrder} className="space-y-4">
+                      <div>
+                        <label className="text-xs font-bold text-slate-200 block mb-1">سبب الإلغاء / الرفض *</label>
+                        <textarea
+                          rows={3}
+                          value={cancellationReasonInput}
+                          onChange={(e) => setCancellationReasonInput(e.target.value)}
+                          placeholder="مثال: عدم توفر المنتج في المخزن الرئيسي / بناءً على طلب العميل / العنوان غير واضح"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:border-red-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-end gap-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setCancellationModalOrder(null)}
+                          className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3.5 py-1.5 rounded-lg text-xs transition-colors"
+                        >
+                          تراجع
+                        </button>
+                        <button
+                          type="submit"
+                          className="bg-red-600 hover:bg-red-500 text-white px-4 py-1.5 rounded-lg text-xs font-bold transition-colors"
+                        >
+                          تأكيد إلغاء الطلب
+                        </button>
+                      </div>
+                    </form>
                   </div>
                 </div>
               )}

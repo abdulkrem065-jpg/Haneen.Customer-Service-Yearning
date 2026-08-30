@@ -229,6 +229,7 @@ ${this.formatCartItemsList(state.cart)}
         createdOrder = await this.orderStore.createOrder(
           {
             customerId: 'cst-web-customer',
+            customerName: state.customerName || '',
             customerPhone: state.customerPhone || '',
             items: state.cart.map(i => ({
               productId: i.productId,

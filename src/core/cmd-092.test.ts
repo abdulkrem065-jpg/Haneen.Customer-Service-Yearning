@@ -98,6 +98,8 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       customerName: 'علي أحمد',
       customerPhone: '771234567',
       deliveryAddress: 'صنعاء - التحرير',
+      customerId: 'c-test-101',
+      updatedAt: new Date(),
       items: [
         {
           id: 'item-101',
@@ -105,9 +107,9 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
           productId: 'prd-001',
           productNameSnapshot: 'زبادي المراعي',
           unitPriceSnapshot: 500,
+          unitPrice: 500,
           quantity: 2,
-          totalPrice: 1000,
-          createdAt: new Date()
+          totalPrice: 1000
         }
       ],
       createdAt: new Date()
@@ -127,6 +129,7 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-alert-102',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 2000,
       deliveryFee: 1000,
       totalAmount: 3000,
@@ -144,12 +147,13 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
           productId: 'prd-001',
           productNameSnapshot: 'زبادي المراعي',
           unitPriceSnapshot: 1000,
+          unitPrice: 1000,
           quantity: 2,
-          totalPrice: 2000,
-          createdAt: new Date()
+          totalPrice: 2000
         }
       ],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(order, canonicalContext);
@@ -170,6 +174,7 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-secret-103',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
@@ -178,7 +183,8 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       paymentMethodName: 'key=AIzaSySecretApiKeyHere',
       deliveryAddress: 'secret=my_secret_key',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(order, canonicalContext);
@@ -192,13 +198,15 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-unread-104',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
       currency: 'YER',
       status: 'PENDING',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(order, canonicalContext);
@@ -212,13 +220,15 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-read-105',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
       currency: 'YER',
       status: 'PENDING',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(order, canonicalContext);
@@ -239,13 +249,15 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-live-106A',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
       currency: 'YER',
       status: 'PENDING',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
     await notifier.notifyNewOrder(order1, canonicalContext);
 
@@ -255,13 +267,15 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-live-106B',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 800,
       deliveryFee: 500,
       totalAmount: 1300,
       currency: 'YER',
       status: 'PENDING',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
     await notifier.notifyNewOrder(order2, canonicalContext);
 
@@ -280,6 +294,7 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
 
     const createdOrder = await orderStore.createOrder(
       {
+        customerId: 'cust-test',
         deliveryAddress: 'صنعاء - الصافية',
         paymentMethodId: 'pm-001',
         paymentMethodName: 'كاش عند الاستلام',
@@ -287,7 +302,6 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
         deliveryFee: 1000,
         totalAmount: 2000,
         currency: 'YER',
-        status: 'PENDING',
         items: []
       },
       canonicalContext
@@ -306,13 +320,15 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-tenantA-108',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
       currency: 'YER',
       status: 'PENDING',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(orderA, canonicalContext);
@@ -329,13 +345,15 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-storeA-109',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
       currency: 'YER',
       status: 'PENDING',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(orderStoreA, canonicalContext);
@@ -352,6 +370,7 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-nophone-110',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
@@ -359,7 +378,8 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       status: 'PENDING',
       customerPhone: undefined,
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(order, canonicalContext);
@@ -372,6 +392,7 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
   it('11. order status change: admin updating order status persists in OrderStore and maintains notification integrity', async () => {
     const created = await orderStore.createOrder(
       {
+        customerId: 'cust-test',
         deliveryAddress: 'صنعاء - المطار',
         paymentMethodId: 'pm-001',
         paymentMethodName: 'كاش عند الاستلام',
@@ -379,7 +400,6 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
         deliveryFee: 500,
         totalAmount: 2000,
         currency: 'YER',
-        status: 'PENDING',
         items: []
       },
       canonicalContext
@@ -397,6 +417,7 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
   it('12. customer status query: customer querying order status gets updated real-time status', async () => {
     const created = await orderStore.createOrder(
       {
+        customerId: 'cust-test',
         deliveryAddress: 'صنعاء - السبعين',
         paymentMethodId: 'pm-001',
         paymentMethodName: 'كاش عند الاستلام',
@@ -404,7 +425,6 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
         deliveryFee: 1000,
         totalAmount: 3000,
         currency: 'YER',
-        status: 'PENDING',
         items: []
       },
       canonicalContext
@@ -416,6 +436,11 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       conversationId: 'conv-123',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      agentId: canonicalContext.agentId,
+      messages: [],
+      status: 'ACTIVE',
+      createdAt: new Date(),
+      updatedAt: new Date(),
       activeOrderId: created.id,
       checkoutState: {
         step: 'ORDER_CREATED',
@@ -434,13 +459,15 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       id: 'ord-dedup-113',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      customerId: 'c1',
       subtotal: 500,
       deliveryFee: 500,
       totalAmount: 1000,
       currency: 'YER',
       status: 'PENDING',
       items: [],
-      createdAt: new Date()
+      createdAt: new Date(),
+      updatedAt: new Date()
     };
 
     await notifier.notifyNewOrder(order1, canonicalContext);
@@ -454,6 +481,7 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
   it('14. restart survival: syncFromOrders derives notifications from persistent order store after simulated restart', async () => {
     const persistentOrder = await orderStore.createOrder(
       {
+        customerId: 'cust-test',
         deliveryAddress: 'صنعاء - الروضة',
         paymentMethodId: 'pm-001',
         paymentMethodName: 'كاش عند الاستلام',
@@ -461,7 +489,6 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
         deliveryFee: 500,
         totalAmount: 2500,
         currency: 'YER',
-        status: 'PENDING',
         items: []
       },
       canonicalContext
@@ -498,9 +525,14 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
       conversationId: 'conv-456',
       tenantId: canonicalContext.tenantId,
       storeId: canonicalContext.storeId,
+      agentId: canonicalContext.agentId,
+      messages: [],
+      status: 'ACTIVE',
+      createdAt: new Date(),
+      updatedAt: new Date(),
       checkoutState: {
         step: 'AWAITING_CONFIRMATION',
-        cart: [{ productId: 'prd-001', productName: 'زبادي', quantity: 2, unitPrice: 500 }],
+        cart: [{ productId: 'prd-001', productName: 'زبادي', quantity: 2, unitPriceSnapshot: 500, subtotal: 1000 }],
         deliveryAddress: 'صنعاء - حدة',
         paymentMethodId: 'pm-001',
         paymentMethodName: 'كاش عند الاستلام',

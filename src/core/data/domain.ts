@@ -101,6 +101,9 @@ export interface Order {
   paymentStatus?: 'UNPAID' | 'PENDING' | 'PAID' | 'FAILED' | string;
   deliveryAddress?: string;
   notes?: string;
+  cancellationReason?: string;
+  cancelledBy?: string;
+  cancelledAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }

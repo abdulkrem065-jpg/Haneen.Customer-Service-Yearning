@@ -301,6 +301,15 @@ async function startServer() {
     }
   });
 
+  app.get('/api/admin/products', async (req, res) => {
+    try {
+      const products = await haneenService.fetchCatalogProducts();
+      res.status(200).json({ success: true, count: products.length, products });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message || 'Failed to fetch products' });
+    }
+  });
+
   app.get('/api/admin/orders/:id', async (req, res) => {
     try {
       const { id } = req.params;
@@ -324,10 +333,15 @@ async function startServer() {
 
   app.post('/api/admin/orders/status', async (req, res) => {
     try {
-      const { orderId, status, tenantId, storeId } = req.body || {};
+      const { orderId, status, tenantId, storeId, cancellationReason, cancelledBy, cancelledAt } = req.body || {};
       if (!orderId || !status) {
         return res.status(400).json({ success: false, error: 'orderId and status are required' });
       }
+
+      if (status === 'CANCELLED' && (!cancellationReason || !cancellationReason.trim())) {
+        return res.status(400).json({ success: false, error: 'سبب الإلغاء مطلوب عند إلغاء الطلب' });
+      }
+
       const { OrderStore } = await import('./src/core/orders/order-store.js');
       const store = OrderStore.getInstance();
       const context = {
@@ -341,7 +355,13 @@ async function startServer() {
         return res.status(404).json({ success: false, error: `Order ${orderId} not found` });
       }
 
-      await store.updateOrderStatus(orderId, status, context);
+      const cancellationDetails = status === 'CANCELLED' ? {
+        cancellationReason: cancellationReason.trim(),
+        cancelledBy: cancelledBy || 'ADMIN',
+        cancelledAt: cancelledAt ? new Date(cancelledAt) : new Date()
+      } : undefined;
+
+      await store.updateOrderStatus(orderId, status, context, cancellationDetails);
       const updated = await store.getOrderById(orderId, context);
       res.status(200).json({ success: true, verdict: 'ORDER_STATUS_UPDATED', order: updated });
     } catch (err: any) {

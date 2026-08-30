@@ -752,6 +752,9 @@ export class OrderMapper implements ISheetMapper<Order> {
     const customerPhone = headerMap.getValue(rowValues, 'customerPhone') || '';
     const customerName = headerMap.getValue(rowValues, 'customerName') || headerMap.getValue(rowValues, 'name') || '';
     const notes = headerMap.getValue(rowValues, 'notes') || '';
+    const cancellationReason = headerMap.getValue(rowValues, 'cancellationReason') || '';
+    const cancelledBy = headerMap.getValue(rowValues, 'cancelledBy') || '';
+    const cancelledAtStr = headerMap.getValue(rowValues, 'cancelledAt') || '';
     const createdAtStr = headerMap.requireValue(rowValues, 'createdAt');
     const updatedAtStr = headerMap.requireValue(rowValues, 'updatedAt');
 
@@ -776,6 +779,9 @@ export class OrderMapper implements ISheetMapper<Order> {
       paymentStatus: paymentStatus as any,
       deliveryAddress,
       notes,
+      cancellationReason: cancellationReason || undefined,
+      cancelledBy: cancelledBy || undefined,
+      cancelledAt: cancelledAtStr ? new Date(cancelledAtStr) : undefined,
       createdAt: new Date(createdAtStr),
       updatedAt: new Date(updatedAtStr)
     };
@@ -799,8 +805,11 @@ export class OrderMapper implements ISheetMapper<Order> {
       customerName: entity.customerName || '',
       customerPhone: entity.customerPhone || '',
       notes: entity.notes || '',
-      createdAt: entity.createdAt.toISOString(),
-      updatedAt: entity.updatedAt.toISOString()
+      cancellationReason: entity.cancellationReason || '',
+      cancelledBy: entity.cancelledBy || '',
+      cancelledAt: entity.cancelledAt ? (typeof entity.cancelledAt === 'string' ? entity.cancelledAt : entity.cancelledAt.toISOString()) : '',
+      createdAt: entity.createdAt instanceof Date ? entity.createdAt.toISOString() : new Date(entity.createdAt).toISOString(),
+      updatedAt: entity.updatedAt instanceof Date ? entity.updatedAt.toISOString() : new Date(entity.updatedAt).toISOString()
     });
   }
 
