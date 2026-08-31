@@ -58,7 +58,7 @@ export class OrderCheckoutEngine {
     catalogProductsSupplier?: () => Promise<Product[]>,
     private readonly deliveryConfigSupplier?: () => Promise<DeliveryConfiguration | null>,
     private readonly paymentMethodsSupplier?: () => Promise<PaymentMethod[]>,
-    orderStore?: OrderStore,
+    orderStore?: any,
     adminNotifier?: IOrderNotificationService
   ) {
     this.catalogProductsSupplier = catalogProductsSupplier;
@@ -68,6 +68,36 @@ export class OrderCheckoutEngine {
     if (adminNotifier) {
       this.adminNotifier = adminNotifier;
     }
+  }
+
+  public extractYemenPhone(text: string): string | null {
+    if (!text) return null;
+    const phoneMatch = text.match(/(?:0?7[013778]\d{7,8}|7[013778]\d{7,8})/);
+    if (phoneMatch) {
+      return phoneMatch[0].trim();
+    }
+    const digitsOnly = text.replace(/[^\d]/g, '');
+    if (/^0?7[013778]\d{7,8}$/.test(digitsOnly)) {
+      return digitsOnly;
+    }
+    return null;
+  }
+
+  public isReconcilePhrase(text: string): boolean {
+    const lower = text.toLowerCase();
+    return (
+      lower.includes('ركز على الطلب') ||
+      lower.includes('هذا هو الطلب') ||
+      lower.includes('الطلب النهائي') ||
+      lower.includes('اريد الطلب كالتالي') ||
+      lower.includes('أريد الطلب كالتالي') ||
+      lower.includes('عدل الطلب') ||
+      lower.includes('عدّل الطلب') ||
+      lower.includes('تعديل الطلب') ||
+      lower.includes('الطلب يكون') ||
+      lower.includes('الطلب هو') ||
+      lower.includes('تصحيح الطلب')
+    );
   }
 
   public setCatalogProductsSupplier(supplier: () => Promise<Product[]>): void {
@@ -160,28 +190,30 @@ ${this.formatCartItemsList(state.cart)}
     }
 
     // --- 3. Customer Identity Capture (Name & Phone Number Parsing) ---
-    const phoneMatch = text.match(/(?:0?7[013778]\d{7}|7\d{8})/);
+    const phoneMatch = this.extractYemenPhone(text);
     const hasNameLikeText = text.replace(/[\d\+\-\s]/g, '').length >= 3;
     const isExplicitIdentity = (
       lowerText.includes('الاسم') ||
       lowerText.includes('الهاتف') ||
       lowerText.includes('رقم جوال') ||
       lowerText.includes('جوالي هو') ||
-      (phoneMatch && hasNameLikeText && (state.activeOrderDraftId || state.cart.length > 0))
-    ) && !lowerText.includes('طريقة الدفع') && !lowerText.includes('محفظة');
+      (phoneMatch && (state.activeOrderDraftId || state.cart.length > 0 || state.step === 'AWAITING_CUSTOMER_INFO'))
+    ) && !lowerText.includes('محفظة');
 
-    if (isExplicitIdentity && (state.activeOrderDraftId || state.cart.length > 0)) {
+    if (isExplicitIdentity && (state.activeOrderDraftId || state.cart.length > 0 || state.step === 'AWAITING_CUSTOMER_INFO')) {
       let phone = state.customerPhone;
       if (phoneMatch) {
-        phone = phoneMatch[0];
+        phone = phoneMatch;
       }
       let name = state.customerName;
       if (hasNameLikeText) {
         const cleanedName = text
-          .replace(/(?:0?7[013778]\d{7}|7\d{8})/, '')
+          .replace(/(?:0?7[013778]\d{7,8}|7[013778]\d{7,8})/, '')
           .replace(/الاسم[:\s]*/i, '')
           .replace(/رقم الهاتف[:\s]*/i, '')
           .replace(/الجوال[:\s]*/i, '')
+          .replace(/شارع.*/i, '')
+          .replace(/طريقة الدفع.*/i, '')
           .trim();
         if (cleanedName.length >= 2 && !cleanedName.includes('شارع') && !cleanedName.includes('حي') && !cleanedName.includes('صنعاء')) {
           name = cleanedName;
@@ -190,7 +222,18 @@ ${this.formatCartItemsList(state.cart)}
       if (name) state.customerName = name;
       if (phone) state.customerPhone = phone;
 
-      if (state.deliveryAddress && state.paymentMethodId) {
+      // Extract address and payment method if included in the same identity message
+      const pRes = await this.resolvePaymentMethod(text);
+      if (pRes.resolvedMethod) {
+        state.paymentMethodId = pRes.resolvedMethod.id;
+        state.paymentMethodName = pRes.resolvedMethod.displayName;
+      }
+      const addrExt = this.extractAddressText(text);
+      if (addrExt) {
+        state.deliveryAddress = addrExt;
+      }
+
+      if (state.deliveryAddress && state.paymentMethodId && state.cart.length > 0) {
         state.step = 'AWAITING_CONFIRMATION';
         return this.generateOrderSummary(state);
       } else {
@@ -360,6 +403,17 @@ ${notificationMsg}`;
     // --- 6. Active Checkout Context & Address / Payment Parsing (Section 6, 10, 12, 14) ---
     const isQuestion = lowerText.includes('هل') || lowerText.includes('متى') || lowerText.includes('كم') || lowerText.includes('أين') || lowerText.includes('اين') || lowerText.includes('؟');
 
+    const isCartMutationOrPurchase = (
+      this.isReconcilePhrase(text) ||
+      Boolean(text.match(/(?:اجعل|خلي|غير كمية|عدل كمية)\s+/i)) ||
+      Boolean(text.match(/^(?:احذف|الغِ|الغ|إلغاء|حذف|شيل)\s+/i)) ||
+      lowerText.includes('أريد') || lowerText.includes('اريد') ||
+      lowerText.includes('كيلو') || lowerText.includes('سمن') ||
+      lowerText.includes('بسكوت') || lowerText.includes('سكر') ||
+      lowerText.includes('تونة') || lowerText.includes('تونه') ||
+      lowerText.includes('دلسي')
+    );
+
     const inActiveCheckoutStep = (
       state.step === 'AWAITING_ADDRESS_AND_PAYMENT' ||
       state.step === 'AWAITING_CUSTOMER_INFO' ||
@@ -367,7 +421,7 @@ ${notificationMsg}`;
       (state.cart.length > 0 && (!state.deliveryAddress || !state.paymentMethodId))
     );
 
-    if (inActiveCheckoutStep && !isQuestion) {
+    if (inActiveCheckoutStep && !isQuestion && !isCartMutationOrPurchase) {
       // 6.1 Check Payment Resolution
       const paymentRes = await this.resolvePaymentMethod(text);
       if (paymentRes.disabledMethod) {
@@ -522,11 +576,58 @@ ${notificationMsg}`;
       return null;
     }
 
-    // --- 7.2 PURCHASE INTENT & MULTI-ITEM PRODUCT RESOLUTION ---
-    const isPurchaseTrigger = isExplicitPurchaseVerb || lowerText.includes('كيلو') || lowerText.includes('سمن') || lowerText.includes('بسكوت') || lowerText.includes('سكر') || lowerText.includes('تونة') || lowerText.includes('تونه') || lowerText.includes('دلسي');
+    // --- 7.2 PURCHASE INTENT, RECONCILIATION & CART MUTATION ---
+    const isReconcile = this.isReconcilePhrase(text);
+    const isPurchaseTrigger = isExplicitPurchaseVerb ||
+      lowerText.includes('كيلو') ||
+      lowerText.includes('سمن') ||
+      lowerText.includes('بسكوت') ||
+      lowerText.includes('سكر') ||
+      lowerText.includes('تونة') ||
+      lowerText.includes('تونه') ||
+      lowerText.includes('دلسي') ||
+      isReconcile;
 
     if (isPurchaseTrigger && !isQuestionOrInquiry) {
-      const segments = this.splitUserTextIntoItemPhrases(text);
+      // 7.2.1 Handle Explicit SET_ITEM_QUANTITY (e.g. "اجعل السكر 3")
+      const setQtyMatch = text.match(/(?:اجعل|خلي|غير كمية|عدل كمية)\s+(?:كمية\s+)?(.+?)\s+(?:إلى|الي|يكون|=|\s)*(\d+)/i);
+      if (setQtyMatch) {
+        const targetName = setQtyMatch[1].trim();
+        const newQty = parseInt(setQtyMatch[2], 10);
+        const segment: ItemSegment = { rawText: targetName, queryPhrase: targetName, normalizedQuery: this.normalizeArabic(targetName), quantity: newQty };
+        const res = this.resolveSingleProductItem(segment, catalog);
+        if (res.status === 'RESOLVED' && res.product) {
+          this.setItemQuantity(state, res.product.id, newQty);
+          if (state.deliveryAddress && state.paymentMethodId) {
+            state.step = 'AWAITING_CONFIRMATION';
+            return this.generateOrderSummary(state);
+          }
+          return `تم تعديل كمية (${res.product.name}) إلى ${newQty} بنجاح. مجموع المنتجات: ${state.subtotal} YER.`;
+        }
+      }
+
+      // 7.2.2 Handle Explicit REMOVE_ITEM (e.g. "احذف السكر")
+      const removeMatch = text.match(/^(?:احذف|الغِ|الغ|إلغاء|حذف|شيل)\s+(?:من الطلب\s+)?(?:من السلة\s+)?(.+)/i);
+      if (removeMatch) {
+        const targetName = removeMatch[1].trim();
+        const segment: ItemSegment = { rawText: targetName, queryPhrase: targetName, normalizedQuery: this.normalizeArabic(targetName), quantity: 1 };
+        const res = this.resolveSingleProductItem(segment, catalog);
+        if (res.status === 'RESOLVED' && res.product) {
+          this.removeItemFromCart(state, res.product.id);
+          if (state.deliveryAddress && state.paymentMethodId) {
+            state.step = 'AWAITING_CONFIRMATION';
+            return this.generateOrderSummary(state);
+          }
+          return `تم حذف (${res.product.name}) من طلبك بنجاح. مجموع المنتجات: ${state.subtotal} YER.`;
+        }
+      }
+
+      // 7.2.3 Handle Item Resolution for RECONCILE vs ADD
+      const cleanedInput = isReconcile
+        ? text.replace(/(?:ركز على الطلب|هذا هو الطلب|الطلب النهائي|أريد الطلب كالتالي|اريد الطلب كالتالي|عدل الطلب|عدّل الطلب|تعديل الطلب|الطلب يكون|الطلب هو|تصحيح الطلب)\s*(?:إلى|الي|بـ|ب)?[\s:]*/gi, '').trim()
+        : text;
+
+      const segments = this.splitUserTextIntoItemPhrases(cleanedInput || text);
       if (segments.length === 0) return null;
 
       const addedProducts: Array<{ product: Product; quantity: number }> = [];
@@ -557,10 +658,22 @@ ${notificationMsg}`;
         return `عذراً، لم نجد منتج (${missingNames}) بهذا الاسم في المتجر.`;
       }
 
-      // Add ONLY resolved unique products to cart
+      // Mutate cart via RECONCILE_CART or ADD_ITEM
       if (addedProducts.length > 0) {
-        for (const item of addedProducts) {
-          this.addItemToCart(state, item.product.id, item.product.name, item.product.price, item.quantity);
+        if (isReconcile) {
+          this.reconcileCart(
+            state,
+            addedProducts.map(item => ({
+              productId: item.product.id,
+              productName: item.product.name,
+              unitPriceSnapshot: item.product.price,
+              quantity: item.quantity
+            }))
+          );
+        } else {
+          for (const item of addedProducts) {
+            this.addItemToCart(state, item.product.id, item.product.name, item.product.price, item.quantity);
+          }
         }
 
         if (!state.activeOrderDraftId) {
@@ -578,7 +691,8 @@ ${notificationMsg}`;
           return this.generateOrderSummary(state) + notFoundNotice;
         } else {
           state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
-          return `تمت إضافة المنتجات إلى طلبك بنجاح:
+          const header = isReconcile ? 'تم تعديل ومزامنة طلبك بنجاح:' : 'تمت إضافة المنتجات إلى طلبك بنجاح:';
+          return `${header}
 ${this.formatCartItemsList(state.cart)}${notFoundNotice}
 مجموع المنتجات: ${state.subtotal} YER.
 
@@ -654,16 +768,22 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
     segment: ItemSegment,
     catalog: Product[]
   ): SingleProductResolutionResult {
-    const normQuery = segment.normalizedQuery;
+    let normQuery = segment.normalizedQuery;
     if (!normQuery || normQuery.length < 2) {
       return { status: 'NOT_FOUND', rawText: segment.rawText };
     }
 
-    const queryTokens = normQuery.split(' ').filter(t => t.length >= 2);
+    normQuery = normQuery.replace(/\s+(فقط|ايضا|أيضا)$/i, '').trim();
+    const cleanQuery = normQuery.replace(/^ال/, '');
+
+    const queryTokens = cleanQuery.split(' ').filter(t => t.length >= 2);
     const categoryKeywords = ['سمن', 'بسكوت', 'عصير', 'رز', 'زيت', 'سكر', 'شاي', 'حليب', 'ماء', 'اناناس', 'تونة', 'تونه', 'دلسي'];
 
     // 1. Exact Match Check
-    const exactMatch = catalog.find(p => this.normalizeArabic(p.name) === normQuery);
+    const exactMatch = catalog.find(p => {
+      const pNorm = this.normalizeArabic(p.name);
+      return pNorm === normQuery || pNorm === cleanQuery || pNorm.replace(/^ال/, '') === cleanQuery;
+    });
     if (exactMatch) {
       return {
         status: 'RESOLVED',
@@ -675,28 +795,39 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
 
     // 2. Candidate Matching across Catalog
     const candidateMatches: Product[] = [];
+    const isCategoryToken = (t: string) => {
+      const clean = t.replace(/^ال/, '');
+      return categoryKeywords.includes(clean) || categoryKeywords.includes(t);
+    };
+    const nonCategoryQueryTokens = queryTokens.filter(qt =>
+      !isCategoryToken(qt) &&
+      !['كيلو', 'حبة', 'قطعة', 'علبة', 'كبير', 'صغير', 'احمر', 'أحمر'].includes(qt.replace(/^ال/, ''))
+    );
 
     for (const prod of catalog) {
       const normName = this.normalizeArabic(prod.name);
-      const prodTokens = normName.split(' ').filter(t => t.length >= 2);
+      const cleanName = normName.replace(/^ال/, '');
 
-      // Check token containment
-      const allQueryTokensInProduct = queryTokens.length > 0 && queryTokens.every(qt => normName.includes(qt));
-      const allProdTokensInQuery = prodTokens.length > 0 && prodTokens.every(pt => normQuery.includes(pt));
+      const allQueryTokensInProduct = queryTokens.length > 0 && queryTokens.every(qt => normName.includes(qt) || cleanName.includes(qt));
+      const allNonCategoryTokensInProduct = nonCategoryQueryTokens.length > 0
+        ? nonCategoryQueryTokens.every(qt => normName.includes(qt) || cleanName.includes(qt))
+        : allQueryTokensInProduct;
 
-      if (allQueryTokensInProduct || allProdTokensInQuery) {
-        candidateMatches.push(prod);
+      if (allQueryTokensInProduct || allNonCategoryTokensInProduct) {
+        if (!candidateMatches.some(c => c.id === prod.id)) {
+          candidateMatches.push(prod);
+        }
       }
     }
 
     // 3. Category Word Ambiguity Check
-    const isGenericCategoryQuery = categoryKeywords.includes(normQuery) || queryTokens.every(qt => categoryKeywords.includes(qt));
+    const isGenericCategoryQuery = categoryKeywords.includes(cleanQuery) || categoryKeywords.includes(normQuery);
     if (isGenericCategoryQuery && candidateMatches.length > 1) {
       return {
         status: 'AMBIGUOUS',
         rawText: segment.rawText,
         candidates: candidateMatches,
-        categoryWord: normQuery
+        categoryWord: cleanQuery
       };
     }
 
@@ -711,17 +842,15 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
     }
 
     if (candidateMatches.length > 1) {
-      // Find highest score / exact token overlap
-      const exactTokenMatch = candidateMatches.find(p => {
-        const prodTokens = this.normalizeArabic(p.name).split(' ').filter(t => t.length >= 2);
-        return queryTokens.length === prodTokens.length && queryTokens.every(qt => prodTokens.includes(qt));
+      const bestMatch = candidateMatches.find(p => {
+        const pNorm = this.normalizeArabic(p.name).replace(/^ال/, '');
+        return cleanQuery.includes(pNorm) || pNorm === cleanQuery;
       });
-
-      if (exactTokenMatch) {
+      if (bestMatch) {
         return {
           status: 'RESOLVED',
           rawText: segment.rawText,
-          product: exactTokenMatch,
+          product: bestMatch,
           quantity: segment.quantity
         };
       }
@@ -729,7 +858,8 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
       return {
         status: 'AMBIGUOUS',
         rawText: segment.rawText,
-        candidates: candidateMatches
+        candidates: candidateMatches,
+        categoryWord: cleanQuery
       };
     }
 
@@ -841,6 +971,55 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
         subtotal: unitPrice * quantity
       });
     }
+    state.subtotal = this.calculateSubtotal(state.cart);
+    state.total = state.subtotal + (state.deliveryFee || 500);
+  }
+
+  public setItemQuantity(state: OrderCheckoutState, productId: string, quantity: number): void {
+    if (quantity <= 0) {
+      this.removeItemFromCart(state, productId);
+      return;
+    }
+    const item = state.cart.find(i => i.productId === productId || i.productName === productId);
+    if (item) {
+      item.quantity = quantity;
+      item.subtotal = item.quantity * item.unitPriceSnapshot;
+    }
+    state.subtotal = this.calculateSubtotal(state.cart);
+    state.total = state.subtotal + (state.deliveryFee || 500);
+  }
+
+  public removeItemFromCart(state: OrderCheckoutState, productIdOrName: string): boolean {
+    const initialLength = state.cart.length;
+    state.cart = state.cart.filter(i => i.productId !== productIdOrName && i.productName !== productIdOrName);
+    state.subtotal = this.calculateSubtotal(state.cart);
+    state.total = state.subtotal + (state.deliveryFee || 500);
+    return state.cart.length < initialLength;
+  }
+
+  public reconcileCart(
+    state: OrderCheckoutState,
+    items: Array<{ productId: string; productName: string; unitPriceSnapshot: number; quantity: number }>
+  ): void {
+    const newCart: CartItem[] = [];
+    for (const item of items) {
+      const existing = newCart.find(i => i.productId === item.productId || i.productName === item.productName);
+      if (existing) {
+        existing.quantity += item.quantity;
+        existing.subtotal = existing.quantity * existing.unitPriceSnapshot;
+      } else {
+        newCart.push({
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          unitPriceSnapshot: item.unitPriceSnapshot,
+          subtotal: item.unitPriceSnapshot * item.quantity
+        });
+      }
+    }
+    state.cart = newCart;
+    state.subtotal = this.calculateSubtotal(state.cart);
+    state.total = state.subtotal + (state.deliveryFee || 500);
   }
 
   public calculateSubtotal(cart: CartItem[]): number {
