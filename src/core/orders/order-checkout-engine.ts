@@ -4,6 +4,50 @@ import { ConversationSession, CartItem, OrderCheckoutState, CheckoutStep } from 
 import { DataOperationContext } from '../data/provider';
 import { Product, DeliveryConfiguration, PaymentMethod } from '../data/domain';
 
+/**
+ * ARCHITECTURAL FRAMEWORK: SMART REASONING + DETERMINISTIC ACTION GUARDS
+ * 
+ * 1. BUSINESS TRUTH LAYER:
+ *    - Google Sheets (Catalog, Prices, Stock, Payment Methods, Delivery Fees)
+ *    - Order Store (Transactional Records)
+ *    * Authoritative Source of Truth. AI never overrides or fabricates business facts.
+ * 
+ * 2. AI REASONING LAYER (Gemini / Sana):
+ *    - Free natural language understanding, dialect handling, multi-turn context,
+ *      alternative suggestions, and smart clarification questions.
+ * 
+ * 3. ACTION GUARD POLICY LAYER (Deterministic Enforcement):
+ *    - READ PRODUCT / PRICE / AVAILABILITY: Evaluates query against Business Truth.
+ *      GUARANTEED NO CART OR CHECKOUT STATE MUTATION.
+ *    - ADD TO CART: Requires purchase intent or candidate confirmation.
+ *      Validates proposed product candidates:
+ *      * Exact / Unique Strong Match -> Validated & Added
+ *      * Multiple Plausible Matches -> Asks Clarification with available options
+ *      * Weak / Uncertain / Not Found -> Notifies item unavailable (NEVER silently substitutes)
+ *    - CREATE ORDER: Requires complete checkout data (cart, address, resolved payment ID, customer phone)
+ *      and explicit user confirmation.
+ * 
+ * 4. MEMORY LAYER:
+ *    - Conversation History, Cart Drafts, Customer Profiles & Preferences.
+ *    - Architecture allows future learning of communication patterns without altering business facts.
+ */
+
+export interface ItemSegment {
+  rawText: string;
+  queryPhrase: string;
+  normalizedQuery: string;
+  quantity: number;
+}
+
+export interface SingleProductResolutionResult {
+  status: 'RESOLVED' | 'NOT_FOUND' | 'AMBIGUOUS';
+  rawText: string;
+  product?: Product;
+  quantity?: number;
+  candidates?: Product[];
+  categoryWord?: string;
+}
+
 export class OrderCheckoutEngine {
   private orderStore = OrderStore.getInstance();
   private adminNotifier: IOrderNotificationService = AdminNotifier.getInstance();
@@ -37,6 +81,7 @@ export class OrderCheckoutEngine {
   ): Promise<string | null> {
     const text = userText.trim();
     const lowerText = text.toLowerCase();
+    const normText = this.normalizeArabic(text);
 
     // Ensure session checkout state is initialized if missing
     if (!session.checkoutState) {
@@ -48,7 +93,6 @@ export class OrderCheckoutEngine {
 
     const state = session.checkoutState;
 
-    // Safe Internal Trace Logging for production debugging (no secrets)
     console.log(`[OrderCheckoutEngine] Trace: conv=${session.conversationId}, draft=${state.activeOrderDraftId || 'none'}, step=${state.step}, cartCount=${state.cart.length}`);
 
     // --- 1. Order Status Queries & Tracking ("أين طلبي؟", "هل طلبي جاهز؟", "حالة الطلب", "ORD-...") ---
@@ -85,7 +129,7 @@ export class OrderCheckoutEngine {
       return `يرجى تزويدنا برقم الطلب (مثل: ORD-20260825-0001) لمتابعة حالته.`;
     }
 
-    // --- 2. "الطلب قد أرسلته سابقاً" / Active Draft Priority (Section 8) ---
+    // --- 2. "الطلب قد أرسلته سابقاً" / Active Draft Priority ---
     const isSentPreviouslyText = (
       lowerText.includes('الطلب قد ارسلته') ||
       lowerText.includes('الطلب قد أرسلته') ||
@@ -115,10 +159,16 @@ ${this.formatCartItemsList(state.cart)}
       }
     }
 
-    // --- 3. Customer Identity (Name & Phone Number Parsing) (Section 7) ---
+    // --- 3. Customer Identity Capture (Name & Phone Number Parsing) ---
     const phoneMatch = text.match(/(?:0?7[013778]\d{7}|7\d{8})/);
     const hasNameLikeText = text.replace(/[\d\+\-\s]/g, '').length >= 3;
-    const isExplicitIdentity = lowerText.includes('الاسم') || lowerText.includes('الهاتف') || lowerText.includes('جوال') || (phoneMatch && hasNameLikeText && (state.activeOrderDraftId || state.cart.length > 0));
+    const isExplicitIdentity = (
+      lowerText.includes('الاسم') ||
+      lowerText.includes('الهاتف') ||
+      lowerText.includes('رقم جوال') ||
+      lowerText.includes('جوالي هو') ||
+      (phoneMatch && hasNameLikeText && (state.activeOrderDraftId || state.cart.length > 0))
+    ) && !lowerText.includes('طريقة الدفع') && !lowerText.includes('محفظة');
 
     if (isExplicitIdentity && (state.activeOrderDraftId || state.cart.length > 0)) {
       let phone = state.customerPhone;
@@ -133,14 +183,13 @@ ${this.formatCartItemsList(state.cart)}
           .replace(/رقم الهاتف[:\s]*/i, '')
           .replace(/الجوال[:\s]*/i, '')
           .trim();
-        if (cleanedName.length >= 2) {
+        if (cleanedName.length >= 2 && !cleanedName.includes('شارع') && !cleanedName.includes('حي') && !cleanedName.includes('صنعاء')) {
           name = cleanedName;
         }
       }
-      state.customerName = name;
-      state.customerPhone = phone;
+      if (name) state.customerName = name;
+      if (phone) state.customerPhone = phone;
 
-      // PRESERVE cart items
       if (state.deliveryAddress && state.paymentMethodId) {
         state.step = 'AWAITING_CONFIRMATION';
         return this.generateOrderSummary(state);
@@ -171,15 +220,19 @@ ${this.formatCartItemsList(state.cart)}
 
     // --- 5. Short Confirmation Messages in AWAITING_CONFIRMATION ("نعم", "أؤكد", "موافق", "جهز الطلب") ---
     const isShortConfirmation = (
-      lowerText.includes('نعم') ||
-      lowerText.includes('أيوه') ||
-      lowerText.includes('ايوه') ||
-      lowerText.includes('أؤكد') ||
-      lowerText.includes('اوكد') ||
-      lowerText.includes('موافق') ||
-      lowerText.includes('تمام') ||
-      lowerText.includes('جهز') ||
-      lowerText.includes('تأكيد')
+      lowerText === 'نعم' ||
+      lowerText === 'نعم أؤكد' ||
+      lowerText === 'نعم اوكد' ||
+      lowerText === 'أيوه' ||
+      lowerText === 'ايوه' ||
+      lowerText === 'أؤكد' ||
+      lowerText === 'أؤكد الطلب' ||
+      lowerText === 'اوكد' ||
+      lowerText === 'موافق' ||
+      lowerText === 'تمام' ||
+      lowerText === 'جهز' ||
+      lowerText === 'جهز الطلب' ||
+      lowerText === 'تأكيد'
     );
 
     // Idempotency Protection for already created order
@@ -191,7 +244,13 @@ ${this.formatCartItemsList(state.cart)}
     }
 
     if (isShortConfirmation && state.cart.length > 0 && (state.step === 'AWAITING_CONFIRMATION' || (state.deliveryAddress && state.paymentMethodId))) {
-      // Re-verify Product Prices and Availability from Google Sheets (Section 10)
+      // Require Customer Phone before finalizing order (Section 13, 17)
+      if (!state.customerPhone || state.customerPhone.trim() === '') {
+        state.step = 'AWAITING_CUSTOMER_INFO';
+        return `يرجى تزويدنا برقم الهاتف (مثل: 771234567) لتأكيد ونشاط الطلب.`;
+      }
+
+      // Re-verify Product Prices and Availability from catalog supplier
       const catalogSupplier = this.catalogProductsSupplier;
       if (catalogSupplier) {
         try {
@@ -209,27 +268,34 @@ ${this.formatCartItemsList(state.cart)}
             }
           }
         } catch (e) {
-          // Ignore transient catalog supplier errors during confirmation
+          // Ignore transient catalog supplier errors
         }
       }
 
       // Calculate Totals
       const subtotal = this.calculateSubtotal(state.cart);
       if (state.deliveryFee === undefined) {
-        state.deliveryFee = 500;
+        let fee = 500;
+        if (this.deliveryConfigSupplier) {
+          try {
+            const config = await this.deliveryConfigSupplier();
+            if (config && config.isEnabled) fee = config.deliveryFee || 500;
+          } catch (e) {}
+        }
+        state.deliveryFee = fee;
       }
       const totalAmount = subtotal + state.deliveryFee;
       state.subtotal = subtotal;
       state.total = totalAmount;
 
-      // Create Order in OrderStore (Durable Persistence Check)
+      // Create Order in OrderStore
       state.step = 'ORDER_CREATING';
       let createdOrder;
       try {
         createdOrder = await this.orderStore.createOrder(
           {
             customerId: 'cst-web-customer',
-            customerName: state.customerName || '',
+            customerName: state.customerName || 'عميل المتجر',
             customerPhone: state.customerPhone || '',
             items: state.cart.map(i => ({
               productId: i.productId,
@@ -244,7 +310,7 @@ ${this.formatCartItemsList(state.cart)}
             paymentMethodId: state.paymentMethodId || 'pay-cod',
             paymentMethodName: state.paymentMethodName || 'كاش عند الاستلام',
             paymentStatus: 'UNPAID',
-            deliveryAddress: state.deliveryAddress || 'استلام من الفرع / العنوان الافتراضي'
+            deliveryAddress: state.deliveryAddress || 'استلام من الفرع'
           },
           context
         );
@@ -259,7 +325,6 @@ ${this.formatCartItemsList(state.cart)}
         return 'تعذر إتمام ونشاط حفظ الطلب حالياً، يرجى المحاولة مرة أخرى بعد لحظات.';
       }
 
-      // Resilient Admin Notification (CMD-088)
       let notifResult: { success: boolean; notificationId: string; status: 'PENDING' | 'SENT' | 'FAILED' } | null = null;
       try {
         notifResult = await this.adminNotifier.notifyNewOrder(createdOrder, context);
@@ -267,7 +332,6 @@ ${this.formatCartItemsList(state.cart)}
         console.warn('[OrderCheckoutEngine] Admin notification failure (non-blocking):', err);
       }
 
-      // Update State ONLY after successful durable persistence
       state.createdOrderId = createdOrder.id;
       state.step = 'ORDER_CREATED';
       session.activeOrderId = createdOrder.id;
@@ -293,92 +357,47 @@ ${this.formatCartItemsList(state.cart)}
 ${notificationMsg}`;
     }
 
-    // --- 6. Address and Payment Parsing (Single or Combined Message) (Section 4, 11, 12) ---
+    // --- 6. Active Checkout Context & Address / Payment Parsing (Section 6, 10, 12, 14) ---
     const isQuestion = lowerText.includes('هل') || lowerText.includes('متى') || lowerText.includes('كم') || lowerText.includes('أين') || lowerText.includes('اين') || lowerText.includes('؟');
-    const isAddressOrPayment = (
-      lowerText.includes('عنوان') ||
-      lowerText.includes('شارع') ||
-      lowerText.includes('حي ') ||
-      lowerText.includes('جوار') ||
-      lowerText.includes('توصيل') ||
-      lowerText.includes('دفع') ||
-      lowerText.includes('كاش') ||
-      lowerText.includes('حاسب') ||
-      lowerText.includes('جيب') ||
-      lowerText.includes('محفظة')
+
+    const inActiveCheckoutStep = (
+      state.step === 'AWAITING_ADDRESS_AND_PAYMENT' ||
+      state.step === 'AWAITING_CUSTOMER_INFO' ||
+      state.step === 'AWAITING_CONFIRMATION' ||
+      (state.cart.length > 0 && (!state.deliveryAddress || !state.paymentMethodId))
     );
 
-    if (isAddressOrPayment && !isQuestion && state.cart.length > 0 && !lowerText.includes('أؤكد')) {
-      // Parse Payment Method
-      if (lowerText.includes('جيب') || lowerText.includes('حاسب') || lowerText.includes('كاش') || lowerText.includes('عند الاستلام') || lowerText.includes('محفظة')) {
-        let activeMethods: PaymentMethod[] = [];
-        if (this.paymentMethodsSupplier) {
-          try {
-            activeMethods = await this.paymentMethodsSupplier();
-          } catch (e) {
-            // Ignore
-          }
-        }
+    if (inActiveCheckoutStep && !isQuestion) {
+      // 6.1 Check Payment Resolution
+      const paymentRes = await this.resolvePaymentMethod(text);
+      if (paymentRes.disabledMethod) {
+        const activeList = paymentRes.activeMethods?.map(m => m.displayName).join('، ') || 'كاش عند الاستلام';
+        return `عذراً، طريقة الدفع (${paymentRes.disabledMethod.displayName}) غير مفعلة حالياً. الطرق المتاحة هي: ${activeList}.`;
+      }
+      if (paymentRes.resolvedMethod) {
+        state.paymentMethodId = paymentRes.resolvedMethod.id;
+        state.paymentMethodName = paymentRes.resolvedMethod.displayName;
+      }
 
-        if (lowerText.includes('جيب') || lowerText.includes('حاسب') || lowerText.includes('محفظة')) {
-          const matchedActive = activeMethods.find(m =>
-            m.isActive && (
-              m.displayName.toLowerCase().includes('جيب') ||
-              m.displayName.toLowerCase().includes('حاسب') ||
-              m.displayName.toLowerCase().includes('محفظة') ||
-              m.id.includes('jeeb') ||
-              m.id.includes('haseb')
-            )
-          );
-
-          const matchedDisabled = activeMethods.find(m =>
-            !m.isActive && (
-              m.displayName.toLowerCase().includes('جيب') ||
-              m.displayName.toLowerCase().includes('حاسب') ||
-              m.id.includes('jeeb')
-            )
-          );
-
-          if (matchedDisabled && !matchedActive) {
-            const activeList = activeMethods.filter(m => m.isActive).map(m => m.displayName).join('، ') || 'كاش عند الاستلام';
-            return `عذراً، طريقة الدفع (محفظة جيب) غير مفعلة حالياً. الطرق المتاحة هي: ${activeList}.`;
-          }
-
-          state.paymentMethodId = matchedActive ? matchedActive.id : 'pay-jeeb';
-          state.paymentMethodName = matchedActive ? matchedActive.displayName : 'محفظة جيب / تحويل حاسب';
-        } else if (lowerText.includes('كاش') || lowerText.includes('عند الاستلام')) {
-          state.paymentMethodId = 'pay-cod';
-          state.paymentMethodName = 'كاش عند الاستلام';
+      // 6.2 Check Delivery Address Extraction
+      const extractedAddress = this.extractAddressText(text);
+      if (extractedAddress) {
+        state.deliveryAddress = extractedAddress;
+      } else if (!state.deliveryAddress && !paymentRes.resolvedMethod && !paymentRes.disabledMethod) {
+        // Single word continuation or general address statement during active checkout step (e.g. "صنعاء")
+        const isProductQuery = lowerText.includes('سمن') || lowerText.includes('سكر') || lowerText.includes('بسكوت') || lowerText.includes('أريد') || lowerText.includes('اريد');
+        if (!isProductQuery && text.length >= 2) {
+          state.deliveryAddress = text;
         }
       }
 
-      // Parse Delivery Address
-      if (lowerText.includes('شارع') || lowerText.includes('حي ') || lowerText.includes('جوار') || lowerText.includes('توصيل') || lowerText.includes('عنوان')) {
-        let cleanAddress = text
-          .replace(/طريقة الدفع[:\s]*/gi, ' ')
-          .replace(/الدفع[:\s]*/gi, ' ')
-          .replace(/جيب/gi, ' ')
-          .replace(/كاش/gi, ' ')
-          .replace(/عند الاستلام/gi, ' ')
-          .replace(/تحويل حاسب/gi, ' ')
-          .replace(/العنوان[:\s]*/gi, '')
-          .replace(/توصيل إلى[:\s]*/gi, '')
-          .trim();
-        if (!cleanAddress) cleanAddress = text;
-        state.deliveryAddress = cleanAddress;
-      }
-
-      // Calculate Delivery Fee
+      // 6.3 Calculate Delivery Fee & Subtotal
       let fee = state.deliveryFee || 500;
       if (this.deliveryConfigSupplier) {
         try {
           const config = await this.deliveryConfigSupplier();
-          if (config && config.isEnabled) {
-            fee = config.deliveryFee || 500;
-          }
-        } catch (e) {
-          // Fallback fee
-        }
+          if (config && config.isEnabled) fee = config.deliveryFee || 500;
+        } catch (e) {}
       }
       state.deliveryFee = fee;
       state.subtotal = this.calculateSubtotal(state.cart);
@@ -388,20 +407,20 @@ ${notificationMsg}`;
         state.activeOrderDraftId = `draft-${Date.now()}`;
       }
 
+      // 6.4 Transition Check
       if (state.deliveryAddress && state.paymentMethodId) {
         state.step = 'AWAITING_CONFIRMATION';
         return this.generateOrderSummary(state);
-      } else if (!state.deliveryAddress) {
+      } else if (state.deliveryAddress && !state.paymentMethodId) {
+        state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
+        return `تم تسجيل عنوان التوصيل: (${state.deliveryAddress}). رسوم التوصيل: ${fee} YER. يرجى تحديد طريقة الدفع (مثل: كاش عند الاستلام، محفظة جوالي) لإكمال الطلب.`;
+      } else if (!state.deliveryAddress && state.paymentMethodId) {
         state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
         return `تم تحديد طريقة الدفع: (${state.paymentMethodName}). يرجى تزويدنا بعنوان التوصيل (مثال: شارع النصر جوار المحول) لعرض ملخص الطلب النهائي.`;
-      } else {
-        state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
-        return `تم تسجيل عنوان التوصيل: (${state.deliveryAddress}). رسوم التوصيل: ${fee} YER. يرجى تحديد طريقة الدفع (مثال: كاش عند الاستلام، محفظة جيب) لإكمال الطلب.`;
       }
     }
 
     // --- 7. Product Resolution & Intent Gate (Informational Queries vs. Purchase Intent) ---
-
     const isQuestionOrInquiry = (
       lowerText.includes('كم') ||
       lowerText.includes('سعر') ||
@@ -436,7 +455,6 @@ ${notificationMsg}`;
       lowerText.includes('اضف') ||
       lowerText.includes('حط') ||
       lowerText.includes('شراء') ||
-      lowerText.includes('طلب ') ||
       lowerText.startsWith('طلب ')
     );
 
@@ -445,7 +463,9 @@ ${notificationMsg}`;
       { id: 'prod-samn', name: 'سمن الماس', price: 2500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
       { id: 'prod-biscuit', name: 'بسكوت ابو ولد', price: 100, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
       { id: 'prod-biskrem', name: 'بسكوت بسكريم كبير', price: 300, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'prod-ananas', name: 'أناناس طازج', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() }
+      { id: 'prod-ananas', name: 'أناناس طازج', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-dalsey-red-sm', name: 'دلسي صغير احمر', price: 200, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-dalsey-red-lg', name: 'دلسي كبير احمر', price: 400, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() }
     ];
 
     const catalogSupplier = this.catalogProductsSupplier;
@@ -454,77 +474,92 @@ ${notificationMsg}`;
         const live = await catalogSupplier();
         if (live && live.length > 0) catalog = live;
       } catch (e) {
-        // Fallback to default catalog
+        // Fallback catalog
       }
     }
 
-    // --- 7.1 INFORMATIONAL QUERIES (PRICE_QUERY / AVAILABILITY_QUERY / CATEGORY_QUERY) ---
+    // --- 7.1 INFORMATIONAL QUERIES (PRICE / AVAILABILITY / CATALOG) ---
     // STRICT INVARIANT: INFORMATIONAL QUERIES MUST NEVER MUTATE CART OR CREATE ORDER DRAFT.
     if (isQuestionOrInquiry && !isExplicitPurchaseVerb) {
       const isPriceQuery = lowerText.includes('سعر') || lowerText.includes('بكم') || lowerText.includes('كم سعر');
       const isAvailabilityQuery = lowerText.includes('هل') || lowerText.includes('متوفر') || lowerText.includes('عندكم') || lowerText.includes('موجود');
       const isCategoryQuery = lowerText.includes('ما عندكم') || lowerText.includes('أنواع') || lowerText.includes('انواع') || lowerText.includes('منتجات') || lowerText.includes('اصناف');
 
-      const searchResult = this.resolveProductMatches(text, catalog);
+      const itemSegments = this.splitUserTextIntoItemPhrases(text);
+      if (itemSegments.length > 0) {
+        const firstSegment = itemSegments[0];
+        const res = this.resolveSingleProductItem(firstSegment, catalog);
 
-      if (isPriceQuery) {
-        if (searchResult.uniqueMatches.length === 1 && searchResult.ambiguousMatches.length === 0) {
-          const prod = searchResult.uniqueMatches[0].product;
-          return `سعر (${prod.name}) هو ${prod.price} YER.`;
-        } else if (searchResult.allMatchedProducts.length > 1) {
-          const listText = searchResult.allMatchedProducts.map(p => `- ${p.name}: ${p.price} YER`).join('\n');
-          return `أسعار المنتجات المتاحة لدينا:\n${listText}`;
-        } else if (searchResult.allMatchedProducts.length === 1) {
-          const prod = searchResult.allMatchedProducts[0];
-          return `سعر (${prod.name}) هو ${prod.price} YER.`;
-        }
-      }
-
-      if (isAvailabilityQuery) {
-        if (searchResult.uniqueMatches.length === 1 && searchResult.ambiguousMatches.length === 0) {
-          const prod = searchResult.uniqueMatches[0].product;
-          if (prod.inStock !== false) {
-            state.lastOfferedProduct = { id: prod.id, name: prod.name, price: prod.price };
-            return `نعم، (${prod.name}) متوفر حالياً بالمخزن بسعر ${prod.price} YER. هل ترغب في إضافته إلى طلبك؟`;
-          } else {
-            return `عذراً، (${prod.name}) غير متوفر حالياً بالمخزن.`;
+        if (isPriceQuery) {
+          if (res.status === 'RESOLVED' && res.product) {
+            return `سعر (${res.product.name}) هو ${res.product.price} YER.`;
+          } else if (res.status === 'AMBIGUOUS' && res.candidates) {
+            const listText = res.candidates.map(p => `- ${p.name}: ${p.price} YER`).join('\n');
+            return `أسعار المنتجات المتاحة لدينا:\n${listText}`;
           }
-        } else if (searchResult.allMatchedProducts.length > 1) {
-          const listText = searchResult.allMatchedProducts.map(p => `- ${p.name}: ${p.price} YER (${p.inStock !== false ? 'متوفر' : 'غير متوفر'})`).join('\n');
-          return `نعم، متوفر لدينا الأنواع التالية:\n${listText}\nأيها ترغب في طلبه؟`;
-        } else if (searchResult.allMatchedProducts.length === 1) {
-          const prod = searchResult.allMatchedProducts[0];
-          if (prod.inStock !== false) {
-            state.lastOfferedProduct = { id: prod.id, name: prod.name, price: prod.price };
-            return `نعم، (${prod.name}) متوفر حالياً بالمخزن بسعر ${prod.price} YER. هل ترغب في إضافته إلى طلبك؟`;
-          } else {
-            return `عذراً، (${prod.name}) غير متوفر حالياً بالمخزن.`;
+        }
+
+        if (isAvailabilityQuery) {
+          if (res.status === 'RESOLVED' && res.product) {
+            if (res.product.inStock !== false) {
+              state.lastOfferedProduct = { id: res.product.id, name: res.product.name, price: res.product.price };
+              return `نعم، (${res.product.name}) متوفر حالياً بالمخزن بسعر ${res.product.price} YER. هل ترغب في إضافته إلى طلبك؟`;
+            } else {
+              return `عذراً، (${res.product.name}) غير متوفر حالياً بالمخزن.`;
+            }
+          } else if (res.status === 'AMBIGUOUS' && res.candidates) {
+            const listText = res.candidates.map(p => `- ${p.name}: ${p.price} YER (${p.inStock !== false ? 'متوفر' : 'غير متوفر'})`).join('\n');
+            return `نعم، متوفر لدينا الأنواع التالية:\n${listText}\nأيها ترغب في طلبه؟`;
           }
         }
       }
 
-      if (isCategoryQuery && searchResult.allMatchedProducts.length > 0) {
-        const listText = searchResult.allMatchedProducts.map(p => `- ${p.name}: ${p.price} YER (${p.inStock !== false ? 'متوفر' : 'غير متوفر'})`).join('\n');
+      if (isCategoryQuery) {
+        const listText = catalog.slice(0, 10).map(p => `- ${p.name}: ${p.price} YER (${p.inStock !== false ? 'متوفر' : 'غير متوفر'})`).join('\n');
         return `إليك المنتجات المتاحة في المتجر:\n${listText}`;
       }
 
       return null;
     }
 
-    // --- 7.2 PURCHASE INTENT / ADD TO CART EXECUTION ---
-    const isOrderKeywordPresent = isExplicitPurchaseVerb || lowerText.includes('كيلو') || lowerText.includes('سمن') || lowerText.includes('بسكوت') || lowerText.includes('سكر') || lowerText.includes('أناناس') || lowerText.includes('اناناس');
+    // --- 7.2 PURCHASE INTENT & MULTI-ITEM PRODUCT RESOLUTION ---
+    const isPurchaseTrigger = isExplicitPurchaseVerb || lowerText.includes('كيلو') || lowerText.includes('سمن') || lowerText.includes('بسكوت') || lowerText.includes('سكر') || lowerText.includes('تونة') || lowerText.includes('تونه') || lowerText.includes('دلسي');
 
-    if (isOrderKeywordPresent && !isQuestionOrInquiry) {
-      const searchResult = this.resolveProductMatches(text, catalog);
+    if (isPurchaseTrigger && !isQuestionOrInquiry) {
+      const segments = this.splitUserTextIntoItemPhrases(text);
+      if (segments.length === 0) return null;
 
-      // MULTIPLE MATCHES SAFETY CHECK: If search yielded ambiguous matches without exact unique match
-      if (searchResult.ambiguousMatches.length > 1 && searchResult.uniqueMatches.length === 0) {
-        const optionsList = searchResult.ambiguousMatches.map(p => p.name).join('، ');
-        return `تتوفر لدينا عدة أنواع من المنتجات المطابقة: (${optionsList}). يرجى تحديد النوع المطلوب بدقة لإضافته إلى طلبك.`;
+      const addedProducts: Array<{ product: Product; quantity: number }> = [];
+      const notFoundItems: string[] = [];
+      const ambiguousItems: Array<{ rawText: string; candidates: Product[] }> = [];
+
+      for (const segment of segments) {
+        const res = this.resolveSingleProductItem(segment, catalog);
+        if (res.status === 'RESOLVED' && res.product && res.quantity) {
+          addedProducts.push({ product: res.product, quantity: res.quantity });
+        } else if (res.status === 'AMBIGUOUS' && res.candidates) {
+          ambiguousItems.push({ rawText: segment.rawText, candidates: res.candidates });
+        } else if (res.status === 'NOT_FOUND') {
+          notFoundItems.push(segment.queryPhrase || segment.rawText);
+        }
       }
 
-      if (searchResult.uniqueMatches.length > 0) {
-        for (const item of searchResult.uniqueMatches) {
+      // Handle Ambiguity Safety Rule: If any item is ambiguous, return clarification request without adding ambiguous items
+      if (ambiguousItems.length > 0 && addedProducts.length === 0) {
+        const firstAmb = ambiguousItems[0];
+        const names = firstAmb.candidates.map(c => c.name).join('، ');
+        return `تتوفر لدينا عدة أنواع مطابقة لـ (${firstAmb.rawText}): (${names}). يرجى تحديد النوع المطلوب بدقة.`;
+      }
+
+      // Handle Not Found Items (No wrong substitution!)
+      if (addedProducts.length === 0 && notFoundItems.length > 0) {
+        const missingNames = notFoundItems.join('، ');
+        return `عذراً، لم نجد منتج (${missingNames}) بهذا الاسم في المتجر.`;
+      }
+
+      // Add ONLY resolved unique products to cart
+      if (addedProducts.length > 0) {
+        for (const item of addedProducts) {
           this.addItemToCart(state, item.product.id, item.product.name, item.product.price, item.quantity);
         }
 
@@ -533,13 +568,18 @@ ${notificationMsg}`;
         }
         state.subtotal = this.calculateSubtotal(state.cart);
 
+        let notFoundNotice = '';
+        if (notFoundItems.length > 0) {
+          notFoundNotice = `\n(ملاحظة: لم نجد منتج "${notFoundItems.join('، ')}" في المتجر ولن يتم إضافته).`;
+        }
+
         if (state.deliveryAddress && state.paymentMethodId) {
           state.step = 'AWAITING_CONFIRMATION';
-          return this.generateOrderSummary(state);
+          return this.generateOrderSummary(state) + notFoundNotice;
         } else {
           state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
           return `تمت إضافة المنتجات إلى طلبك بنجاح:
-${this.formatCartItemsList(state.cart)}
+${this.formatCartItemsList(state.cart)}${notFoundNotice}
 مجموع المنتجات: ${state.subtotal} YER.
 
 يرجى تزويدنا بعنوان التوصيل وطريقة الدفع لإكمال الطلب.`;
@@ -550,72 +590,241 @@ ${this.formatCartItemsList(state.cart)}
     return null;
   }
 
-  private normalizeArabic(str: string): string {
+  public normalizeArabic(str: string): string {
     return str
       .toLowerCase()
       .replace(/[\u064B-\u0652]/g, '')
       .replace(/[أإآ]/g, 'ا')
       .replace(/ة/g, 'ه')
       .replace(/ى/g, 'ي')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
-  private resolveProductMatches(
-    userText: string,
-    catalog: Product[]
-  ): {
-    uniqueMatches: Array<{ product: Product; quantity: number }>;
-    ambiguousMatches: Product[];
-    allMatchedProducts: Product[];
-  } {
-    const normUserText = this.normalizeArabic(userText);
+  public splitUserTextIntoItemPhrases(userText: string): ItemSegment[] {
+    let cleaned = userText
+      .replace(/^(أريد|اريد|اشتري|أشتري|بدنا|طلب|حط|أضف|اضف)\s+/i, '')
+      .trim();
 
-    const qualifiedMatches: Array<{ product: Product; quantity: number }> = [];
-    const genericMatches: Product[] = [];
+    // Split multi-product phrases by "و", ",", newline, "+"
+    const rawParts = cleaned.split(/(?:\s+و\s*|\s*,\s*|\n+|\s*\+\s*)/);
+    const segments: ItemSegment[] = [];
 
-    const categoryKeywords = ['سمن', 'بسكوت', 'عصير', 'رز', 'زيت', 'سكر', 'شاي', 'حليب', 'ماء', 'اناناس'];
+    for (let part of rawParts) {
+      part = part.trim();
+      if (!part) continue;
 
-    for (const prod of catalog) {
-      const normProdName = this.normalizeArabic(prod.name);
-      const prodTokens = normProdName.split(' ').filter(t => t.length >= 2);
+      // Extract quantity
+      let quantity = 1;
 
-      const genericToken = prodTokens.find(t => categoryKeywords.includes(t)) || prodTokens[0];
-      const qualifierTokens = prodTokens.filter(t => t !== genericToken && t.length >= 2);
+      // Number matches: "1 بسكوت", "2 سكر", "3 كيلو"
+      const numMatch = part.match(/^(\d+)\s*(.*)/);
+      let queryPhrase = part;
 
-      const textContainsGeneric = normUserText.includes(genericToken) || normUserText.includes(normProdName);
-      const textContainsQualifier = qualifierTokens.length === 0 || qualifierTokens.some(qt => normUserText.includes(qt));
-
-      if (textContainsGeneric && textContainsQualifier) {
-        let qty = 1;
-        const qtyRegex = new RegExp(`(\\d+)\\s*(?:كيلو|علبه|علب|كرتون|بكت|حبه|حبات)?\\s*${genericToken}`, 'i');
-        const qtyMatch = userText.match(qtyRegex) || userText.match(/(\d+)/);
-        if (qtyMatch) {
-          qty = parseInt(qtyMatch[1], 10) || 1;
-        }
-        qualifiedMatches.push({ product: prod, quantity: qty });
-      } else if (textContainsGeneric) {
-        genericMatches.push(prod);
+      if (numMatch) {
+        quantity = parseInt(numMatch[1], 10) || 1;
+        queryPhrase = numMatch[2].trim();
+      } else if (part.includes('اثنين') || part.includes('حبتين') || part.includes('علبتين')) {
+        quantity = 2;
+        queryPhrase = part.replace(/(اثنين|حبتين|علبتين)/g, '').trim();
+      } else if (part.includes('ثلاثة') || part.includes('ثلاث')) {
+        quantity = 3;
+        queryPhrase = part.replace(/(ثلاثة|ثلاث)/g, '').trim();
       }
+
+      // Strip trailing/leading unit words from queryPhrase
+      const strippedQuery = queryPhrase
+        .replace(/^(كيلو|حبة|قطعة|علبة|بكت|كرتون)\s+/i, '')
+        .replace(/\s+(كيلو|حبة|قطعة|علبة|بكت|كرتون)$/i, '')
+        .trim();
+
+      const normalizedQuery = this.normalizeArabic(strippedQuery || queryPhrase || part);
+      segments.push({
+        rawText: part,
+        queryPhrase: strippedQuery || queryPhrase || part,
+        normalizedQuery,
+        quantity
+      });
     }
 
-    if (qualifiedMatches.length > 0) {
-      const allProdsMap = new Map<string, Product>();
-      for (const m of qualifiedMatches) allProdsMap.set(m.product.id, m.product);
+    return segments;
+  }
+
+  public resolveSingleProductItem(
+    segment: ItemSegment,
+    catalog: Product[]
+  ): SingleProductResolutionResult {
+    const normQuery = segment.normalizedQuery;
+    if (!normQuery || normQuery.length < 2) {
+      return { status: 'NOT_FOUND', rawText: segment.rawText };
+    }
+
+    const queryTokens = normQuery.split(' ').filter(t => t.length >= 2);
+    const categoryKeywords = ['سمن', 'بسكوت', 'عصير', 'رز', 'زيت', 'سكر', 'شاي', 'حليب', 'ماء', 'اناناس', 'تونة', 'تونه', 'دلسي'];
+
+    // 1. Exact Match Check
+    const exactMatch = catalog.find(p => this.normalizeArabic(p.name) === normQuery);
+    if (exactMatch) {
       return {
-        uniqueMatches: qualifiedMatches,
-        ambiguousMatches: [],
-        allMatchedProducts: Array.from(allProdsMap.values())
+        status: 'RESOLVED',
+        rawText: segment.rawText,
+        product: exactMatch,
+        quantity: segment.quantity
       };
     }
 
-    const allProdsMap = new Map<string, Product>();
-    for (const p of genericMatches) allProdsMap.set(p.id, p);
+    // 2. Candidate Matching across Catalog
+    const candidateMatches: Product[] = [];
 
-    return {
-      uniqueMatches: [],
-      ambiguousMatches: genericMatches,
-      allMatchedProducts: Array.from(allProdsMap.values())
-    };
+    for (const prod of catalog) {
+      const normName = this.normalizeArabic(prod.name);
+      const prodTokens = normName.split(' ').filter(t => t.length >= 2);
+
+      // Check token containment
+      const allQueryTokensInProduct = queryTokens.length > 0 && queryTokens.every(qt => normName.includes(qt));
+      const allProdTokensInQuery = prodTokens.length > 0 && prodTokens.every(pt => normQuery.includes(pt));
+
+      if (allQueryTokensInProduct || allProdTokensInQuery) {
+        candidateMatches.push(prod);
+      }
+    }
+
+    // 3. Category Word Ambiguity Check
+    const isGenericCategoryQuery = categoryKeywords.includes(normQuery) || queryTokens.every(qt => categoryKeywords.includes(qt));
+    if (isGenericCategoryQuery && candidateMatches.length > 1) {
+      return {
+        status: 'AMBIGUOUS',
+        rawText: segment.rawText,
+        candidates: candidateMatches,
+        categoryWord: normQuery
+      };
+    }
+
+    // 4. Resolution Outcomes
+    if (candidateMatches.length === 1) {
+      return {
+        status: 'RESOLVED',
+        rawText: segment.rawText,
+        product: candidateMatches[0],
+        quantity: segment.quantity
+      };
+    }
+
+    if (candidateMatches.length > 1) {
+      // Find highest score / exact token overlap
+      const exactTokenMatch = candidateMatches.find(p => {
+        const prodTokens = this.normalizeArabic(p.name).split(' ').filter(t => t.length >= 2);
+        return queryTokens.length === prodTokens.length && queryTokens.every(qt => prodTokens.includes(qt));
+      });
+
+      if (exactTokenMatch) {
+        return {
+          status: 'RESOLVED',
+          rawText: segment.rawText,
+          product: exactTokenMatch,
+          quantity: segment.quantity
+        };
+      }
+
+      return {
+        status: 'AMBIGUOUS',
+        rawText: segment.rawText,
+        candidates: candidateMatches
+      };
+    }
+
+    return { status: 'NOT_FOUND', rawText: segment.rawText };
+  }
+
+  public async resolvePaymentMethod(
+    userText: string
+  ): Promise<{ resolvedMethod?: PaymentMethod; disabledMethod?: PaymentMethod; activeMethods?: PaymentMethod[] }> {
+    const normText = this.normalizeArabic(userText);
+    const lowerText = userText.toLowerCase();
+
+    let activeMethods: PaymentMethod[] = [];
+    if (this.paymentMethodsSupplier) {
+      try {
+        activeMethods = await this.paymentMethodsSupplier();
+      } catch (e) {
+        // Fallback
+      }
+    }
+
+    if (activeMethods.length === 0) {
+      activeMethods = [
+        { id: 'pay-cod', displayName: 'كاش عند الاستلام', methodType: 'cash_on_delivery', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 1, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'pay-jawali', displayName: 'جوالي / محفظة جوالي', methodType: 'wallet', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 2, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'pay-jeeb', displayName: 'محفظة جيب', methodType: 'wallet', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 3, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'pay-onecash', displayName: 'وان كاش / OneCash', methodType: 'wallet', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 4, createdAt: new Date(), updatedAt: new Date() }
+      ];
+    }
+
+    const isJawali = normText.includes('جوالي') || normText.includes('جوال');
+    const isOneCash = normText.includes('وان كاش') || normText.includes('وانكاش') || normText.includes('وا ن كاش') || lowerText.includes('onecash');
+    const isJeeb = normText.includes('جيب') || normText.includes('حاسب') || normText.includes('محفظه جيب');
+    const isCod = normText.includes('كاش') || normText.includes('عند الاستلام') || normText.includes('الدفع عند الاستلام');
+
+    if (isJawali) {
+      const match = activeMethods.find(m => m.displayName.includes('جوالي') || m.displayName.includes('جوال') || m.id.includes('jawali'));
+      if (match) {
+        if (!match.isActive) return { disabledMethod: match, activeMethods: activeMethods.filter(m => m.isActive) };
+        return { resolvedMethod: match };
+      }
+    }
+
+    if (isOneCash) {
+      const match = activeMethods.find(m => m.displayName.includes('وان كاش') || m.id.includes('onecash'));
+      if (match) {
+        if (!match.isActive) return { disabledMethod: match, activeMethods: activeMethods.filter(m => m.isActive) };
+        return { resolvedMethod: match };
+      }
+    }
+
+    if (isJeeb) {
+      const match = activeMethods.find(m => m.displayName.includes('جيب') || m.id.includes('jeeb'));
+      if (match) {
+        if (!match.isActive) return { disabledMethod: match, activeMethods: activeMethods.filter(m => m.isActive) };
+        return { resolvedMethod: match };
+      }
+    }
+
+    if (isCod) {
+      const match = activeMethods.find(m => m.displayName.includes('كاش') || m.displayName.includes('الاستلام') || m.id.includes('cod'));
+      if (match) {
+        if (!match.isActive) return { disabledMethod: match, activeMethods: activeMethods.filter(m => m.isActive) };
+        return { resolvedMethod: match };
+      }
+    }
+
+    return {};
+  }
+
+  public extractAddressText(text: string): string | null {
+    const norm = this.normalizeArabic(text);
+    const hasAddressKeyword = (
+      norm.includes('شارع') ||
+      norm.includes('حي ') ||
+      norm.includes('جوار') ||
+      norm.includes('منطقه') ||
+      norm.includes('مديريه') ||
+      norm.includes('توصيل') ||
+      norm.includes('عنوان') ||
+      norm.includes('صنعاء')
+    );
+
+    if (!hasAddressKeyword) return null;
+
+    let clean = text
+      .replace(/طريقة الدفع[:\s]*[\w\u0600-\u06FF]*/gi, ' ')
+      .replace(/الدفع[:\s]*[\w\u0600-\u06FF]*/gi, ' ')
+      .replace(/(جوالي|وان كاش|جيب|كاش|عند الاستلام)/gi, ' ')
+      .replace(/العنوان[:\s]*/gi, '')
+      .replace(/توصيل إلى[:\s]*/gi, '')
+      .trim();
+
+    if (clean.length >= 2) return clean;
+    return text;
   }
 
   public addItemToCart(state: OrderCheckoutState, productId: string, productName: string, unitPrice: number, quantity: number): void {
@@ -677,3 +886,4 @@ ${state.customerName ? `اسم العميل: ${state.customerName}\n` : ''}${sta
     return statusMap[status] || status;
   }
 }
+
