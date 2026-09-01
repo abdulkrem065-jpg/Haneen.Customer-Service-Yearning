@@ -266,16 +266,22 @@ ${this.formatCartItemsList(state.cart)}
       lowerText === 'نعم' ||
       lowerText === 'نعم أؤكد' ||
       lowerText === 'نعم اوكد' ||
+      lowerText === 'نعم أؤكد الطلب' ||
+      lowerText === 'نعم اوكد الطلب' ||
       lowerText === 'أيوه' ||
       lowerText === 'ايوه' ||
       lowerText === 'أؤكد' ||
       lowerText === 'أؤكد الطلب' ||
       lowerText === 'اوكد' ||
+      lowerText === 'اوكد الطلب' ||
       lowerText === 'موافق' ||
       lowerText === 'تمام' ||
       lowerText === 'جهز' ||
       lowerText === 'جهز الطلب' ||
-      lowerText === 'تأكيد'
+      lowerText === 'تأكيد' ||
+      lowerText.includes('أؤكد الطلب') ||
+      lowerText.includes('اوكد الطلب') ||
+      lowerText.includes('نعم أؤكد')
     );
 
     // Idempotency Protection for already created order
@@ -287,6 +293,10 @@ ${this.formatCartItemsList(state.cart)}
     }
 
     if (isShortConfirmation && state.cart.length > 0 && (state.step === 'AWAITING_CONFIRMATION' || (state.deliveryAddress && state.paymentMethodId))) {
+      if (!state.customerPhone) {
+        const sessAny = session as any;
+        state.customerPhone = sessAny.customerPhone || sessAny.customerIdentity?.phone || undefined;
+      }
       // Require Customer Phone before finalizing order (Section 13, 17)
       if (!state.customerPhone || state.customerPhone.trim() === '') {
         state.step = 'AWAITING_CUSTOMER_INFO';
@@ -360,12 +370,12 @@ ${this.formatCartItemsList(state.cart)}
       } catch (err) {
         console.error('[OrderCheckoutEngine] Order persistence failed:', err);
         state.step = 'AWAITING_CONFIRMATION';
-        return 'تعذر إتمام ونشاط حفظ الطلب حالياً، يرجى المحاولة مرة أخرى بعد لحظات.';
+        return 'Persistence verification failed';
       }
 
       if (!createdOrder || !createdOrder.id) {
         state.step = 'AWAITING_CONFIRMATION';
-        return 'تعذر إتمام ونشاط حفظ الطلب حالياً، يرجى المحاولة مرة أخرى بعد لحظات.';
+        return 'Persistence verification failed';
       }
 
       let notifResult: { success: boolean; notificationId: string; status: 'PENDING' | 'SENT' | 'FAILED' } | null = null;
@@ -385,8 +395,10 @@ ${this.formatCartItemsList(state.cart)}
         : (createdOrder.customerPhone || 'غير محدد');
 
       let notificationMsg = 'تم تسجيل طلبك، وجارٍ إرسال الإشعار للإدارة.';
-      if (notifResult?.status === 'SENT' || notifResult?.status === 'PENDING') {
-        notificationMsg = 'تم تسجيل طلبك بنجاح، وتم إشعار الإدارة.';
+      if (notifResult?.status === 'SENT') {
+        notificationMsg = 'تم استلام طلبك وتم إشعار الإدارة بنجاح.';
+      } else if (notifResult?.status === 'PENDING') {
+        notificationMsg = 'تم تسجيل طلبك، وجارٍ إرسال الإشعار للإدارة.';
       } else if (notifResult?.status === 'FAILED' || !notifResult) {
         notificationMsg = 'تم تسجيل طلبك، لكن تعذر إرسال إشعار تلقائي للإدارة حالياً.';
       }

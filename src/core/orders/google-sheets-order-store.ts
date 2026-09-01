@@ -48,11 +48,7 @@ export class GoogleSheetsOrderStore implements IOrderStore {
     return this.transport;
   }
 
-  private async ensureTabsExist(): Promise<void> {
-    if (this.initializedTabs) {
-      return;
-    }
-
+  public async ensureSchema(): Promise<{ ordersAdded: string[]; orderItemsAdded: string[] }> {
     try {
       if (this.transport.ensureSheetExists) {
         await this.transport.ensureSheetExists(this.orderMapper.sheetName);
@@ -61,8 +57,15 @@ export class GoogleSheetsOrderStore implements IOrderStore {
         await this.transport.createSheet(this.orderMapper.sheetName);
         await this.transport.createSheet(this.orderItemMapper.sheetName);
       }
+    } catch (err) {
+      console.warn('[GoogleSheetsOrderStore] Tab creation warning:', err);
+    }
 
-      // Ensure header row exists for orders
+    const ordersAdded: string[] = [];
+    const orderItemsAdded: string[] = [];
+
+    // 1. Self-healing for 'orders' sheet
+    try {
       const orderRows = await this.transport.getRows(this.orderMapper.sheetName);
       if (orderRows.length === 0) {
         if (this.transport.writeHeaderRow) {
@@ -70,9 +73,28 @@ export class GoogleSheetsOrderStore implements IOrderStore {
         } else {
           await this.transport.addRow(this.orderMapper.sheetName, this.orderMapper.defaultHeaders);
         }
+        ordersAdded.push(...this.orderMapper.defaultHeaders);
+      } else {
+        const existingHeaders = orderRows[0].values || [];
+        const existingMap = new HeaderMap(existingHeaders, []);
+        
+        const missingOrderHeaders = this.orderMapper.defaultHeaders.filter(h => !existingMap.hasHeader(h));
+        if (missingOrderHeaders.length > 0) {
+          const updatedOrderHeaders = [...existingHeaders, ...missingOrderHeaders];
+          if (this.transport.writeHeaderRow) {
+            await this.transport.writeHeaderRow(this.orderMapper.sheetName, updatedOrderHeaders);
+          } else {
+            await this.transport.updateRow(this.orderMapper.sheetName, 1, updatedOrderHeaders);
+          }
+          ordersAdded.push(...missingOrderHeaders);
+        }
       }
+    } catch (err) {
+      console.warn('[GoogleSheetsOrderStore] Order schema self-healing notice:', err);
+    }
 
-      // Ensure header row exists for order_items
+    // 2. Self-healing for 'order_items' sheet
+    try {
       const itemRows = await this.transport.getRows(this.orderItemMapper.sheetName);
       if (itemRows.length === 0) {
         if (this.transport.writeHeaderRow) {
@@ -80,12 +102,32 @@ export class GoogleSheetsOrderStore implements IOrderStore {
         } else {
           await this.transport.addRow(this.orderItemMapper.sheetName, this.orderItemMapper.defaultHeaders);
         }
+        orderItemsAdded.push(...this.orderItemMapper.defaultHeaders);
+      } else {
+        const existingItemHeaders = itemRows[0].values || [];
+        const existingItemMap = new HeaderMap(existingItemHeaders, []);
+        
+        const missingItemHeaders = this.orderItemMapper.defaultHeaders.filter(h => !existingItemMap.hasHeader(h));
+        if (missingItemHeaders.length > 0) {
+          const updatedItemHeaders = [...existingItemHeaders, ...missingItemHeaders];
+          if (this.transport.writeHeaderRow) {
+            await this.transport.writeHeaderRow(this.orderItemMapper.sheetName, updatedItemHeaders);
+          } else {
+            await this.transport.updateRow(this.orderItemMapper.sheetName, 1, updatedItemHeaders);
+          }
+          orderItemsAdded.push(...missingItemHeaders);
+        }
       }
-
-      this.initializedTabs = true;
     } catch (err) {
-      console.warn('[GoogleSheetsOrderStore] Tab initialization notice:', err);
+      console.warn('[GoogleSheetsOrderStore] Order items schema self-healing notice:', err);
     }
+
+    this.initializedTabs = true;
+    return { ordersAdded, orderItemsAdded };
+  }
+
+  private async ensureTabsExist(): Promise<void> {
+    await this.ensureSchema();
   }
 
   private async syncDailySequenceFromSheets(): Promise<void> {
@@ -230,16 +272,76 @@ export class GoogleSheetsOrderStore implements IOrderStore {
 
     newOrder.items = orderItems;
 
-    // 3. READ-BACK VERIFICATION
+    // 3. READ-BACK VERIFICATION & STRICT FIELD ASSERTION
     const readBackOrder = await this.getOrderById(orderId, context);
     if (!readBackOrder) {
       throw new Error(`Read-back verification failed: Order ${orderId} not found after write`);
     }
-    if (readBackOrder.items.length < payload.items.length) {
-      throw new Error(`Read-back verification failed: Expected ${payload.items.length} items, found ${readBackOrder.items.length}`);
-    }
+
+    this.assertReadBackOrder(newOrder, readBackOrder);
 
     return readBackOrder;
+  }
+
+  private assertReadBackOrder(expected: Order, actual: Order): void {
+    if (actual.id !== expected.id) {
+      throw new Error(`Read-back verification mismatch [id]: expected "${expected.id}", got "${actual.id}"`);
+    }
+    if (actual.tenantId !== expected.tenantId) {
+      throw new Error(`Read-back verification mismatch [tenantId]: expected "${expected.tenantId}", got "${actual.tenantId}"`);
+    }
+    if (actual.storeId !== expected.storeId) {
+      throw new Error(`Read-back verification mismatch [storeId]: expected "${expected.storeId}", got "${actual.storeId}"`);
+    }
+    if (expected.customerName && actual.customerName !== expected.customerName) {
+      throw new Error(`Read-back verification mismatch [customerName]: expected "${expected.customerName}", got "${actual.customerName}"`);
+    }
+    if (expected.customerPhone && actual.customerPhone !== expected.customerPhone) {
+      throw new Error(`Read-back verification mismatch [customerPhone]: expected "${expected.customerPhone}", got "${actual.customerPhone}"`);
+    }
+    if (expected.deliveryAddress && actual.deliveryAddress !== expected.deliveryAddress) {
+      throw new Error(`Read-back verification mismatch [deliveryAddress]: expected "${expected.deliveryAddress}", got "${actual.deliveryAddress}"`);
+    }
+    if (expected.paymentMethodId && actual.paymentMethodId !== expected.paymentMethodId) {
+      throw new Error(`Read-back verification mismatch [paymentMethodId]: expected "${expected.paymentMethodId}", got "${actual.paymentMethodId}"`);
+    }
+    if (expected.paymentMethodName && actual.paymentMethodName !== expected.paymentMethodName) {
+      throw new Error(`Read-back verification mismatch [paymentMethodName]: expected "${expected.paymentMethodName}", got "${actual.paymentMethodName}"`);
+    }
+    if (actual.subtotal !== expected.subtotal) {
+      throw new Error(`Read-back verification mismatch [subtotal]: expected ${expected.subtotal}, got ${actual.subtotal}`);
+    }
+    if (actual.deliveryFee !== expected.deliveryFee) {
+      throw new Error(`Read-back verification mismatch [deliveryFee]: expected ${expected.deliveryFee}, got ${actual.deliveryFee}`);
+    }
+    if (actual.totalAmount !== expected.totalAmount) {
+      throw new Error(`Read-back verification mismatch [totalAmount]: expected ${expected.totalAmount}, got ${actual.totalAmount}`);
+    }
+
+    // Items assertions
+    if (actual.items.length !== expected.items.length) {
+      throw new Error(`Read-back verification mismatch [items length]: expected ${expected.items.length}, got ${actual.items.length}`);
+    }
+
+    for (let i = 0; i < expected.items.length; i++) {
+      const expItem = expected.items[i];
+      const actItem = actual.items.find(it => it.productId === expItem.productId || it.id === expItem.id);
+      if (!actItem) {
+        throw new Error(`Read-back verification mismatch [item missing]: item for product ${expItem.productId} not found`);
+      }
+      if (expItem.productNameSnapshot && actItem.productNameSnapshot !== expItem.productNameSnapshot) {
+        throw new Error(`Read-back verification mismatch [productNameSnapshot]: expected "${expItem.productNameSnapshot}", got "${actItem.productNameSnapshot}"`);
+      }
+      if (actItem.quantity !== expItem.quantity) {
+        throw new Error(`Read-back verification mismatch [quantity]: expected ${expItem.quantity}, got ${actItem.quantity}`);
+      }
+      if (actItem.unitPriceSnapshot !== expItem.unitPriceSnapshot) {
+        throw new Error(`Read-back verification mismatch [unitPrice]: expected ${expItem.unitPriceSnapshot}, got ${actItem.unitPriceSnapshot}`);
+      }
+      if (actItem.totalPrice !== expItem.totalPrice) {
+        throw new Error(`Read-back verification mismatch [totalPrice]: expected ${expItem.totalPrice}, got ${actItem.totalPrice}`);
+      }
+    }
   }
 
   public async getOrderById(orderId: string, context: DataOperationContext): Promise<Order | null> {
