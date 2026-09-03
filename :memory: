@@ -1,0 +1,37 @@
+[
+  {
+    "id": "ORD-20260903-0001",
+    "tenantId": "tnt-test",
+    "storeId": "str-test",
+    "customerId": "cst-web-customer",
+    "customerName": "عميل المتجر",
+    "customerPhone": "",
+    "items": [
+      {
+        "id": "item-ORD-20260903-0001-1",
+        "orderId": "ORD-20260903-0001",
+        "productId": "prod-sugar",
+        "productNameSnapshot": "سكر السعيد ابو كيلو",
+        "productName": "سكر السعيد ابو كيلو",
+        "quantity": 1,
+        "unitPriceSnapshot": 500,
+        "unitPrice": 500,
+        "totalPrice": 500,
+        "subtotal": 500
+      }
+    ],
+    "subtotal": 500,
+    "deliveryFee": 500,
+    "totalAmount": 1000,
+    "total": 1000,
+    "currency": "YER",
+    "status": "PENDING",
+    "paymentMethodId": "pay-jawali",
+    "paymentMethodName": "محفظة جوالي",
+    "paymentStatus": "UNPAID",
+    "deliveryAddress": "شارع النصر صنعاء",
+    "notes": "",
+    "createdAt": "2026-09-03T21:44:14.770Z",
+    "updatedAt": "2026-09-03T21:44:14.770Z"
+  }
+]

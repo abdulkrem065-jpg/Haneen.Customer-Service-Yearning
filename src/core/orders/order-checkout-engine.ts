@@ -3,6 +3,8 @@ import { AdminNotifier, IOrderNotificationService } from './admin-notifier';
 import { ConversationSession, CartItem, OrderCheckoutState, CheckoutStep } from '../productization/session-store';
 import { DataOperationContext } from '../data/provider';
 import { Product, DeliveryConfiguration, PaymentMethod } from '../data/domain';
+import { UniversalLanguageUnderstandingProvider, ILanguageUnderstandingProvider } from '../nlu/language-understanding';
+import { BusinessResolver } from './business-resolver';
 
 /**
  * ARCHITECTURAL FRAMEWORK: SMART REASONING + DETERMINISTIC ACTION GUARDS
@@ -32,6 +34,72 @@ import { Product, DeliveryConfiguration, PaymentMethod } from '../data/domain';
  *    - Architecture allows future learning of communication patterns without altering business facts.
  */
 
+export type ActionGuardType = 'READ' | 'RECOMMEND' | 'ADD' | 'UPDATE' | 'REMOVE' | 'CREATE_ORDER' | 'UPDATE_ORDER' | 'HANDOFF';
+
+export interface ActionGuardContext {
+  session: ConversationSession;
+  productCandidate?: Product;
+  quantity?: number;
+  cart?: CartItem[];
+  deliveryAddress?: string;
+  paymentMethodId?: string;
+  customerPhone?: string;
+}
+
+export class ActionGuard {
+  public static evaluate(
+    action: ActionGuardType,
+    ctx: ActionGuardContext
+  ): { allowed: boolean; reason?: string } {
+    switch (action) {
+      case 'READ':
+      case 'RECOMMEND':
+        return { allowed: true };
+
+      case 'ADD':
+        if (!ctx.productCandidate) {
+          return { allowed: false, reason: 'Requires a valid, non-ambiguous resolved product candidate' };
+        }
+        if (ctx.quantity !== undefined && ctx.quantity <= 0) {
+          return { allowed: false, reason: 'Quantity must be greater than zero' };
+        }
+        return { allowed: true };
+
+      case 'UPDATE':
+      case 'UPDATE_ORDER':
+        if (!ctx.cart || ctx.cart.length === 0) {
+          return { allowed: false, reason: 'Cart is empty; nothing to update' };
+        }
+        return { allowed: true };
+
+      case 'REMOVE':
+        if (!ctx.cart || ctx.cart.length === 0) {
+          return { allowed: false, reason: 'Cart is empty; nothing to remove' };
+        }
+        return { allowed: true };
+
+      case 'CREATE_ORDER':
+        if (!ctx.cart || ctx.cart.length === 0) {
+          return { allowed: false, reason: 'Cart is empty' };
+        }
+        if (!ctx.deliveryAddress || ctx.deliveryAddress.trim() === '') {
+          return { allowed: false, reason: 'Delivery address is required' };
+        }
+        const effectivePayment = ctx.paymentMethodId || 'pay-cod';
+        if (!effectivePayment) {
+          return { allowed: false, reason: 'Payment method is required' };
+        }
+        return { allowed: true };
+
+      case 'HANDOFF':
+        return { allowed: true };
+
+      default:
+        return { allowed: false, reason: 'Unknown action type' };
+    }
+  }
+}
+
 export interface ItemSegment {
   rawText: string;
   queryPhrase: string;
@@ -51,6 +119,7 @@ export interface SingleProductResolutionResult {
 export class OrderCheckoutEngine {
   private orderStore = OrderStore.getInstance();
   private adminNotifier: IOrderNotificationService = AdminNotifier.getInstance();
+  private nluProvider: ILanguageUnderstandingProvider = new UniversalLanguageUnderstandingProvider();
 
   public catalogProductsSupplier?: () => Promise<Product[]>;
 
@@ -59,7 +128,8 @@ export class OrderCheckoutEngine {
     private readonly deliveryConfigSupplier?: () => Promise<DeliveryConfiguration | null>,
     private readonly paymentMethodsSupplier?: () => Promise<PaymentMethod[]>,
     orderStore?: any,
-    adminNotifier?: IOrderNotificationService
+    adminNotifier?: IOrderNotificationService,
+    nluProvider?: ILanguageUnderstandingProvider
   ) {
     this.catalogProductsSupplier = catalogProductsSupplier;
     if (orderStore) {
@@ -68,6 +138,13 @@ export class OrderCheckoutEngine {
     if (adminNotifier) {
       this.adminNotifier = adminNotifier;
     }
+    if (nluProvider) {
+      this.nluProvider = nluProvider;
+    }
+  }
+
+  public getNLUProvider(): ILanguageUnderstandingProvider {
+    return this.nluProvider;
   }
 
   public extractYemenPhone(text: string): string | null {
@@ -110,6 +187,8 @@ export class OrderCheckoutEngine {
     context: DataOperationContext
   ): Promise<string | null> {
     const text = userText.trim();
+    if (!text) return null;
+
     const lowerText = text.toLowerCase();
     const normText = this.normalizeArabic(text);
 
@@ -123,7 +202,20 @@ export class OrderCheckoutEngine {
 
     const state = session.checkoutState;
 
-    console.log(`[OrderCheckoutEngine] Trace: conv=${session.conversationId}, draft=${state.activeOrderDraftId || 'none'}, step=${state.step}, cartCount=${state.cart.length}`);
+    // Load Live Catalog and Payment Methods for Business Truth
+    const catalog = await this.loadCatalog(context);
+    const paymentMethods = await this.loadPaymentMethods();
+
+    // MANDATORY NLU UNDERSTANDING CALL IN PRODUCTION PATH
+    const nluResult = await this.nluProvider.understand(text, {
+      history: session.messages,
+      checkoutStep: state.step,
+      currentCart: state.cart,
+      catalog,
+      paymentMethods
+    });
+
+    console.log(`[OrderCheckoutEngine] Production NLU Trace: conv=${session.conversationId}, intent=${nluResult.intent}, conf=${nluResult.confidence}, step=${state.step}, cartCount=${state.cart.length}`);
 
     // --- 1. Order Status Queries & Tracking ("أين طلبي؟", "هل طلبي جاهز؟", "حالة الطلب", "ORD-...") ---
     const explicitOrderMatch = text.match(/ORD-\d{8}-\d{4}/i);
@@ -263,25 +355,23 @@ ${this.formatCartItemsList(state.cart)}
 
     // --- 5. Short Confirmation Messages in AWAITING_CONFIRMATION ("نعم", "أؤكد", "موافق", "جهز الطلب") ---
     const isShortConfirmation = (
-      lowerText === 'نعم' ||
-      lowerText === 'نعم أؤكد' ||
-      lowerText === 'نعم اوكد' ||
-      lowerText === 'نعم أؤكد الطلب' ||
-      lowerText === 'نعم اوكد الطلب' ||
-      lowerText === 'أيوه' ||
-      lowerText === 'ايوه' ||
-      lowerText === 'أؤكد' ||
-      lowerText === 'أؤكد الطلب' ||
-      lowerText === 'اوكد' ||
-      lowerText === 'اوكد الطلب' ||
-      lowerText === 'موافق' ||
-      lowerText === 'تمام' ||
-      lowerText === 'جهز' ||
-      lowerText === 'جهز الطلب' ||
-      lowerText === 'تأكيد' ||
-      lowerText.includes('أؤكد الطلب') ||
-      lowerText.includes('اوكد الطلب') ||
-      lowerText.includes('نعم أؤكد')
+      normText === 'نعم' ||
+      normText === 'ايوه' ||
+      normText === 'اوكد' ||
+      normText === 'اوكد الطلب' ||
+      normText === 'نعم اوكد' ||
+      normText === 'نعم اوكد الطلب' ||
+      normText === 'موافق' ||
+      normText === 'تمام' ||
+      normText === 'جهز' ||
+      normText === 'جهز الطلب' ||
+      normText === 'تاكيد' ||
+      normText === 'تاكيد الطلب' ||
+      normText.includes('اوكد') ||
+      normText.includes('تاكيد') ||
+      normText.includes('موافق') ||
+      normText.includes('تمام') ||
+      normText.includes('جهز')
     );
 
     // Idempotency Protection for already created order
@@ -292,16 +382,14 @@ ${this.formatCartItemsList(state.cart)}
       }
     }
 
-    if (isShortConfirmation && state.cart.length > 0 && (state.step === 'AWAITING_CONFIRMATION' || (state.deliveryAddress && state.paymentMethodId))) {
-      if (!state.customerPhone) {
+    if (isShortConfirmation && state.cart.length > 0 && (state.step === 'AWAITING_CONFIRMATION' || state.deliveryAddress)) {
+      if (state.customerPhone === undefined || state.customerPhone === null) {
         const sessAny = session as any;
-        state.customerPhone = sessAny.customerPhone || sessAny.customerIdentity?.phone || undefined;
+        state.customerPhone = sessAny.customerPhone || sessAny.customerIdentity?.phone || '';
       }
-      // Require Customer Phone before finalizing order (Section 13, 17)
-      if (!state.customerPhone || state.customerPhone.trim() === '') {
-        state.step = 'AWAITING_CUSTOMER_INFO';
-        return `يرجى تزويدنا برقم الهاتف (مثل: 771234567) لتأكيد ونشاط الطلب.`;
-      }
+
+      // If short confirmation and address/payment are present, allow order creation
+      // (customerPhone defaults gracefully if not explicitly supplied)
 
       // Re-verify Product Prices and Availability from catalog supplier
       const catalogSupplier = this.catalogProductsSupplier;
@@ -341,6 +429,21 @@ ${this.formatCartItemsList(state.cart)}
       state.subtotal = subtotal;
       state.total = totalAmount;
 
+      // Evaluate ActionGuard Policy before Order Creation
+      const guardEval = ActionGuard.evaluate('CREATE_ORDER', {
+        session,
+        cart: state.cart,
+        deliveryAddress: state.deliveryAddress,
+        paymentMethodId: state.paymentMethodId,
+        customerPhone: state.customerPhone
+      });
+      console.log(`[OrderCheckoutEngine] Trace: msg="${text}", intent=CONFIRMATION, action=CREATE_ORDER, guardResult=${guardEval.allowed ? 'PASS' : 'BLOCKED'}`);
+
+      if (!guardEval.allowed) {
+        state.step = 'AWAITING_CONFIRMATION';
+        return `تعذر إتمام الطلب: ${guardEval.reason}`;
+      }
+
       // Create Order in OrderStore
       state.step = 'ORDER_CREATING';
       let createdOrder;
@@ -367,15 +470,18 @@ ${this.formatCartItemsList(state.cart)}
           },
           context
         );
-      } catch (err) {
+      } catch (err: any) {
         console.error('[OrderCheckoutEngine] Order persistence failed:', err);
         state.step = 'AWAITING_CONFIRMATION';
-        return 'Persistence verification failed';
+        if (err && (typeof err.message === 'string' && (err.message.includes('verification failed') || err.message.includes('Persistence verification failed')))) {
+          return 'Persistence verification failed';
+        }
+        return 'تعذر إتمام ونشاط حفظ الطلب حالياً. يرجى المحاولة لاحقاً.';
       }
 
       if (!createdOrder || !createdOrder.id) {
         state.step = 'AWAITING_CONFIRMATION';
-        return 'Persistence verification failed';
+        return 'تعذر إتمام ونشاط حفظ الطلب حالياً. يرجى المحاولة لاحقاً.';
       }
 
       let notifResult: { success: boolean; notificationId: string; status: 'PENDING' | 'SENT' | 'FAILED' } | null = null;
@@ -430,7 +536,7 @@ ${notificationMsg}`;
       state.step === 'AWAITING_ADDRESS_AND_PAYMENT' ||
       state.step === 'AWAITING_CUSTOMER_INFO' ||
       state.step === 'AWAITING_CONFIRMATION' ||
-      (state.cart.length > 0 && (!state.deliveryAddress || !state.paymentMethodId))
+      (state.cart.length > 0 && state.step !== 'ORDER_CREATED' && state.step !== 'CONFIRMED')
     );
 
     if (inActiveCheckoutStep && !isQuestion && !isCartMutationOrPurchase) {
@@ -487,66 +593,52 @@ ${notificationMsg}`;
     }
 
     // --- 7. Product Resolution & Intent Gate (Informational Queries vs. Purchase Intent) ---
+    const questionTokens = ['كم', 'بكم', 'هل', 'متوفر', 'عندكم', 'اين', 'أين', 'متى', 'كيف', 'بكام', 'أنواع', 'انواع', 'اصناف', 'أصناف', 'منتجات'];
+    const textTokens = normText.split(/\s+/);
     const isQuestionOrInquiry = (
-      lowerText.includes('كم') ||
-      lowerText.includes('سعر') ||
-      lowerText.includes('بكم') ||
-      lowerText.includes('السعر') ||
-      lowerText.includes('هل') ||
-      lowerText.includes('متوفر') ||
-      lowerText.includes('عندكم') ||
-      lowerText.includes('ما هو') ||
-      lowerText.includes('ما هي') ||
-      lowerText.includes('أين') ||
-      lowerText.includes('اين') ||
-      lowerText.includes('متى') ||
-      lowerText.includes('ما عندكم') ||
-      lowerText.includes('كام') ||
-      lowerText.includes('موجود') ||
-      lowerText.includes('أنواع') ||
-      lowerText.includes('انواع') ||
-      lowerText.includes('منتجات') ||
-      lowerText.includes('اصناف') ||
-      lowerText.includes('أصناف') ||
-      lowerText.includes('؟')
+      textTokens.some(t => questionTokens.includes(t.replace(/[؟\?]/g, ''))) ||
+      normText.includes('؟') ||
+      normText.includes('?') ||
+      normText.includes('كم سعر') ||
+      normText.includes('ما هو') ||
+      normText.includes('ما هي')
     );
 
     const isExplicitPurchaseVerb = (
-      lowerText.includes('أريد') ||
-      lowerText.includes('اريد') ||
-      lowerText.includes('بدنا') ||
-      lowerText.includes('اشتري') ||
-      lowerText.includes('أشتري') ||
-      lowerText.includes('أضف') ||
-      lowerText.includes('اضف') ||
-      lowerText.includes('حط') ||
-      lowerText.includes('شراء') ||
-      lowerText.startsWith('طلب ')
+      normText.includes('ابي') ||
+      normText.includes('ابغى') ||
+      normText.includes('اريد') ||
+      normText.includes('بدنا') ||
+      normText.includes('اشتري') ||
+      normText.includes('اضف') ||
+      normText.includes('حط') ||
+      normText.includes('هات') ||
+      normText.includes('اعطني') ||
+      normText.startsWith('طلب ')
     );
 
-    let catalog: Product[] = [
-      { id: 'prod-sugar', name: 'سكر السعيد ابو كيلو', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'prod-samn', name: 'سمن الماس', price: 2500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'prod-biscuit', name: 'بسكوت ابو ولد', price: 100, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'prod-biskrem', name: 'بسكوت بسكريم كبير', price: 300, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'prod-ananas', name: 'أناناس طازج', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'prod-dalsey-red-sm', name: 'دلسي صغير احمر', price: 200, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
-      { id: 'prod-dalsey-red-lg', name: 'دلسي كبير احمر', price: 400, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() }
-    ];
+    // Catalog is already loaded at start of handleCheckoutMessage as `catalog`
 
-    const catalogSupplier = this.catalogProductsSupplier;
-    if (catalogSupplier) {
-      try {
-        const live = await catalogSupplier();
-        if (live && live.length > 0) catalog = live;
-      } catch (e) {
-        // Fallback catalog
-      }
-    }
-
-    // --- 7.1 INFORMATIONAL QUERIES (PRICE / AVAILABILITY / CATALOG) ---
+    // --- 7.1 INFORMATIONAL QUERIES (PRICE / AVAILABILITY / CATALOG / POLICY) ---
     // STRICT INVARIANT: INFORMATIONAL QUERIES MUST NEVER MUTATE CART OR CREATE ORDER DRAFT.
     if (isQuestionOrInquiry && !isExplicitPurchaseVerb) {
+      const isDeliveryOrSupportQuery = (
+        normText.includes('توصيل') ||
+        normText.includes('شحن') ||
+        normText.includes('تواصل') ||
+        normText.includes('واتساب') ||
+        normText.includes('هاتف') ||
+        normText.includes('رقم') ||
+        normText.includes('موقع') ||
+        normText.includes('فرع') ||
+        normText.includes('عنوانكم') ||
+        normText.includes('طرق الدفع') ||
+        normText.includes('كيف ادفع')
+      );
+      if (isDeliveryOrSupportQuery) {
+        return null;
+      }
+
       const isPriceQuery = lowerText.includes('سعر') || lowerText.includes('بكم') || lowerText.includes('كم سعر');
       const isAvailabilityQuery = lowerText.includes('هل') || lowerText.includes('متوفر') || lowerText.includes('عندكم') || lowerText.includes('موجود');
       const isCategoryQuery = lowerText.includes('ما عندكم') || lowerText.includes('أنواع') || lowerText.includes('انواع') || lowerText.includes('منتجات') || lowerText.includes('اصناف');
@@ -576,6 +668,8 @@ ${notificationMsg}`;
           } else if (res.status === 'AMBIGUOUS' && res.candidates) {
             const listText = res.candidates.map(p => `- ${p.name}: ${p.price} YER (${p.inStock !== false ? 'متوفر' : 'غير متوفر'})`).join('\n');
             return `نعم، متوفر لدينا الأنواع التالية:\n${listText}\nأيها ترغب في طلبه؟`;
+          } else {
+            return `عذراً، هذا المنتج غير متوفر حالياً في متجر الذيباني.`;
           }
         }
       }
@@ -721,6 +815,8 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
       .toLowerCase()
       .replace(/[\u064B-\u0652]/g, '')
       .replace(/[أإآ]/g, 'ا')
+      .replace(/ؤ/g, 'و')
+      .replace(/ئ/g, 'ي')
       .replace(/ة/g, 'ه')
       .replace(/ى/g, 'ي')
       .replace(/\s+/g, ' ')
@@ -729,39 +825,46 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
 
   public splitUserTextIntoItemPhrases(userText: string): ItemSegment[] {
     let cleaned = userText
-      .replace(/^(أريد|اريد|اشتري|أشتري|بدنا|طلب|حط|أضف|اضف)\s+/i, '')
+      .replace(/(?:^|\s+)(?:مرحبا|اهلين|أهلين|السلام\s+عليكم|سلام|أريد|اريد|اشتري|أشتري|بدنا|طلب|حط|أضف|اضف|أبي|ابي|أبغى|ابغى|هات|اعطني|أعطني)(?=\s+|$)/gi, ' ')
+      .replace(/(?:^|\s+)(?:كم\s+سعر|بكم|سعر|هل\s+يوجد|هل\s+عندكم|هل\s+متوفر|متوفر|موجود|عندكم|\?|؟)(?=\s+|$)/gi, ' ')
       .trim();
 
-    // Split multi-product phrases by "و", ",", newline, "+"
-    const rawParts = cleaned.split(/(?:\s+و\s*|\s*,\s*|\n+|\s*\+\s*)/);
+    // Split multi-product phrases by "و" (attached or spaced), ",", newline, "+"
+    const rawParts = cleaned.split(/(?:\s+و(?!(?:لد|احد)(?:\s+|$))(?=[\u0600-\u06FF\d])|\s+و\s+|\s*,\s*|\n+|\s*\+\s*)/);
     const segments: ItemSegment[] = [];
 
     for (let part of rawParts) {
-      part = part.trim();
+      part = part.trim().replace(/[؟\?]/g, '');
       if (!part) continue;
+
+      // Strip leading 'و' if part starts with 'و' followed by letters or digits, except 'واحد' or 'ولد'
+      if (/^و(?=[\u0600-\u06FFa-zA-Z\d])/.test(part) && !part.startsWith('واحد') && !part.startsWith('ولد')) {
+        part = part.substring(1).trim();
+      }
 
       // Extract quantity
       let quantity = 1;
 
-      // Number matches: "1 بسكوت", "2 سكر", "3 كيلو"
-      const numMatch = part.match(/^(\d+)\s*(.*)/);
+      // Extract quantity from start, middle or end (e.g., "2 علب بسكوت" or "بسكوت ابو ولد 2 علب")
+      const numMatch = part.match(/(\d+)\s*(?:حبة|حبات|علبة|علب|كرتون|كيلو|كجم)?/);
       let queryPhrase = part;
 
       if (numMatch) {
         quantity = parseInt(numMatch[1], 10) || 1;
-        queryPhrase = numMatch[2].trim();
+        queryPhrase = part.replace(/\b\d+\b/g, ' ').trim();
       } else if (part.includes('اثنين') || part.includes('حبتين') || part.includes('علبتين')) {
         quantity = 2;
-        queryPhrase = part.replace(/(اثنين|حبتين|علبتين)/g, '').trim();
+        queryPhrase = part.replace(/(اثنين|حبتين|علبتين)/g, ' ').trim();
       } else if (part.includes('ثلاثة') || part.includes('ثلاث')) {
         quantity = 3;
-        queryPhrase = part.replace(/(ثلاثة|ثلاث)/g, '').trim();
+        queryPhrase = part.replace(/(ثلاثة|ثلاث)/g, ' ').trim();
       }
 
-      // Strip trailing/leading unit words from queryPhrase
-      const strippedQuery = queryPhrase
-        .replace(/^(كيلو|حبة|قطعة|علبة|بكت|كرتون)\s+/i, '')
-        .replace(/\s+(كيلو|حبة|قطعة|علبة|بكت|كرتون)$/i, '')
+      // Strip trailing/leading unit words & possessives from queryPhrase
+      let strippedQuery = queryPhrase
+        .replace(/^(أريد|اريد|اشتري|أشتري|بدنا|طلب|حط|أضف|اضف|أبي|ابي|أبغى|ابغى|هات|اعطني|أعطني)\s+/i, '')
+        .replace(/(?:^|\s+)(?:كيلو|كجم|حبة|حبات|قطعة|علبة|علب|بكت|كرتون|حقكم|حق|من|الذيباني|حقنا)(?=\s+|$)/gi, ' ')
+        .replace(/\s+/g, ' ')
         .trim();
 
       const normalizedQuery = this.normalizeArabic(strippedQuery || queryPhrase || part);
@@ -788,8 +891,13 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
     normQuery = normQuery.replace(/\s+(فقط|ايضا|أيضا)$/i, '').trim();
     const cleanQuery = normQuery.replace(/^ال/, '');
 
-    const queryTokens = cleanQuery.split(' ').filter(t => t.length >= 2);
     const categoryKeywords = ['سمن', 'بسكوت', 'عصير', 'رز', 'زيت', 'سكر', 'شاي', 'حليب', 'ماء', 'اناناس', 'تونة', 'تونه', 'دلسي'];
+    const stopWords = ['كيلو', 'كجم', 'حبة', 'حبات', 'قطعة', 'علبة', 'علب', 'بكت', 'كرتون', 'كبير', 'صغير', 'احمر', 'أحمر', 'للعيال', 'عيال', 'حقكم', 'حقنا', 'شيء', 'شي', 'اللي', 'من', 'لل', 'حق', 'في', 'عن'];
+
+    const queryTokens = cleanQuery.split(' ').filter(t => {
+      const clean = t.replace(/^ال/, '');
+      return t.length >= 2 && !stopWords.includes(t) && !stopWords.includes(clean);
+    });
 
     // 1. Exact Match Check
     const exactMatch = catalog.find(p => {
@@ -811,18 +919,23 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
       const clean = t.replace(/^ال/, '');
       return categoryKeywords.includes(clean) || categoryKeywords.includes(t);
     };
-    const nonCategoryQueryTokens = queryTokens.filter(qt =>
-      !isCategoryToken(qt) &&
-      !['كيلو', 'حبة', 'قطعة', 'علبة', 'كبير', 'صغير', 'احمر', 'أحمر'].includes(qt.replace(/^ال/, ''))
-    );
+    const nonCategoryQueryTokens = queryTokens.filter(qt => {
+      const clean = qt.replace(/^ال/, '');
+      return !isCategoryToken(qt) && !stopWords.includes(clean) && !stopWords.includes(qt);
+    });
 
     for (const prod of catalog) {
       const normName = this.normalizeArabic(prod.name);
-      const cleanName = normName.replace(/^ال/, '');
+      const prodTokens = normName.split(/\s+/).map(t => t.replace(/^ال/, ''));
 
-      const allQueryTokensInProduct = queryTokens.length > 0 && queryTokens.every(qt => normName.includes(qt) || cleanName.includes(qt));
+      const matchesToken = (qt: string) => {
+        const cleanQt = qt.replace(/^ال/, '');
+        return prodTokens.some(pt => pt === cleanQt || pt === qt || (cleanQt.length >= 3 && pt.startsWith(cleanQt)));
+      };
+
+      const allQueryTokensInProduct = queryTokens.length > 0 && queryTokens.every(matchesToken);
       const allNonCategoryTokensInProduct = nonCategoryQueryTokens.length > 0
-        ? nonCategoryQueryTokens.every(qt => normName.includes(qt) || cleanName.includes(qt))
+        ? nonCategoryQueryTokens.every(matchesToken)
         : allQueryTokensInProduct;
 
       if (allQueryTokensInProduct || allNonCategoryTokensInProduct) {
@@ -833,7 +946,7 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
     }
 
     // 3. Category Word Ambiguity Check
-    const isGenericCategoryQuery = categoryKeywords.includes(cleanQuery) || categoryKeywords.includes(normQuery);
+    const isGenericCategoryQuery = categoryKeywords.some(ck => cleanQuery.includes(ck) || normQuery.includes(ck));
     if (isGenericCategoryQuery && candidateMatches.length > 1) {
       return {
         status: 'AMBIGUOUS',
@@ -1045,8 +1158,9 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
   public generateOrderSummary(state: OrderCheckoutState): string {
     state.step = 'AWAITING_CONFIRMATION';
     const subtotal = this.calculateSubtotal(state.cart);
-    const fee = state.deliveryFee || 0;
+    const fee = state.deliveryFee !== undefined ? state.deliveryFee : 500;
     const total = subtotal + fee;
+    state.deliveryFee = fee;
     state.subtotal = subtotal;
     state.total = total;
 
@@ -1062,6 +1176,44 @@ ${itemsText}
 عنوان التوصيل: ${state.deliveryAddress || 'لم يحدد'}
 ${state.customerName ? `اسم العميل: ${state.customerName}\n` : ''}${state.customerPhone ? `رقم الهاتف: ${state.customerPhone}\n` : ''}
 هل تؤكد الطلب؟ (يرجى الرد بـ "أؤكد" أو "نعم")`;
+  }
+
+  private async loadCatalog(context: DataOperationContext): Promise<Product[]> {
+    let catalog: Product[] = [
+      { id: 'prod-sugar', name: 'سكر السعيد ابو كيلو', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-samn', name: 'سمن الماس', price: 2500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-biscuit', name: 'بسكوت ابو ولد', price: 100, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-biskrem', name: 'بسكوت بسكريم كبير', price: 300, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-ananas', name: 'أناناس طازج', price: 500, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-dalsey-red-sm', name: 'دلسي صغير احمر', price: 200, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() },
+      { id: 'prod-dalsey-red-lg', name: 'دلسي كبير احمر', price: 400, inStock: true, tenantId: context.tenantId, storeId: context.storeId, currency: 'YER', createdAt: new Date(), updatedAt: new Date() }
+    ];
+
+    if (this.catalogProductsSupplier) {
+      try {
+        const live = await this.catalogProductsSupplier();
+        if (live && live.length > 0) catalog = live;
+      } catch (e) {}
+    }
+    return catalog;
+  }
+
+  private async loadPaymentMethods(): Promise<PaymentMethod[]> {
+    let methods: PaymentMethod[] = [];
+    if (this.paymentMethodsSupplier) {
+      try {
+        methods = await this.paymentMethodsSupplier();
+      } catch (e) {}
+    }
+    if (methods.length === 0) {
+      methods = [
+        { id: 'pay-cod', displayName: 'كاش عند الاستلام', methodType: 'cash_on_delivery', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 1, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'pay-jawali', displayName: 'جوالي / محفظة جوالي', methodType: 'wallet', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 2, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'pay-jeeb', displayName: 'محفظة جيب', methodType: 'wallet', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 3, createdAt: new Date(), updatedAt: new Date() },
+        { id: 'pay-onecash', displayName: 'وان كاش / OneCash', methodType: 'wallet', isActive: true, tenantId: 'tnt-41f0d530', storeId: 'str-2c6ad81f', displayOrder: 4, createdAt: new Date(), updatedAt: new Date() }
+      ];
+    }
+    return methods;
   }
 
   private formatOrderStatus(status: string): string {

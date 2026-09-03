@@ -536,7 +536,8 @@ describe('CMD-092: Real-Time Zero-Cost Admin Order Alerts Test Suite', () => {
         deliveryAddress: 'صنعاء - حدة',
         paymentMethodId: 'pm-001',
         paymentMethodName: 'كاش عند الاستلام',
-        customerName: 'أحمد'
+        customerName: 'أحمد',
+        customerPhone: '770000000'
       }
     };
 

@@ -22,7 +22,30 @@ export const ChatInterface: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<'ACTIVE' | 'REQUIRES_HUMAN' | 'CLOSED'>('ACTIVE');
-  const [showAdmin, setShowAdmin] = useState(false);
+  const [showAdmin, setShowAdmin] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.location.hash === '#admin' || window.location.pathname.startsWith('/admin') || window.location.search.includes('admin=true');
+  });
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setShowAdmin(window.location.hash === '#admin' || window.location.pathname.startsWith('/admin') || window.location.search.includes('admin=true'));
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const toggleAdmin = (val?: boolean) => {
+    const nextVal = val !== undefined ? val : !showAdmin;
+    setShowAdmin(nextVal);
+    if (typeof window !== 'undefined') {
+      if (nextVal) {
+        window.history.replaceState(null, '', '#admin');
+      } else if (window.location.hash === '#admin') {
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    }
+  };
   const [showLeadModal, setShowLeadModal] = useState(false);
   const [leadFormData, setLeadFormData] = useState({ name: '', phone: '', serviceType: 'استشارة رقمية', email: '' });
 
@@ -225,7 +248,7 @@ export const ChatInterface: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setShowAdmin(!showAdmin)}
+            onClick={() => toggleAdmin()}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 rounded-lg text-xs font-medium transition-colors border border-emerald-500/30"
           >
             <Settings className="w-3.5 h-3.5" />
@@ -237,7 +260,7 @@ export const ChatInterface: React.FC = () => {
       {/* Main Body */}
       {showAdmin ? (
         <div className="flex-1 p-4 bg-slate-950 overflow-hidden">
-          <StoreSettingsAdmin onClose={() => setShowAdmin(false)} />
+          <StoreSettingsAdmin onClose={() => toggleAdmin(false)} />
         </div>
       ) : (
         <div className="flex-1 flex flex-col justify-between overflow-hidden relative">

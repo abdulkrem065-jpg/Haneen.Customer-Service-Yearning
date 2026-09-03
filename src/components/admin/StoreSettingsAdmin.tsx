@@ -27,7 +27,8 @@ import {
   Package,
   Eye,
   UserCheck,
-  Calendar
+  Calendar,
+  History
 } from 'lucide-react';
 
 interface SettingCategory {
@@ -652,7 +653,7 @@ export const StoreSettingsAdmin: React.FC<StoreSettingsAdminProps> = ({ onClose 
 
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={fetchOrders}
+                    onClick={() => fetchOrders()}
                     disabled={ordersLoading}
                     className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors border border-emerald-500/30 shadow-lg"
                   >

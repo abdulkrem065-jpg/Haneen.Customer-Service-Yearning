@@ -46,7 +46,8 @@ describe('CMD-089 — REAL ADMIN NOTIFICATION CHANNEL DISCOVERY & ZERO-COST LIVE
         deliveryAddress: 'صنعاء - شارع الزبيري',
         paymentMethodId: 'pay-cod',
         paymentMethodName: 'كاش عند الاستلام',
-        deliveryFee: 500
+        deliveryFee: 500,
+        customerPhone: '770000000'
       }
     };
   }
