@@ -44,6 +44,7 @@ export interface ActionGuardContext {
   deliveryAddress?: string;
   paymentMethodId?: string;
   customerPhone?: string;
+  customerName?: string;
 }
 
 export class ActionGuard {
@@ -80,14 +81,19 @@ export class ActionGuard {
 
       case 'CREATE_ORDER':
         if (!ctx.cart || ctx.cart.length === 0) {
-          return { allowed: false, reason: 'Cart is empty' };
+          return { allowed: false, reason: 'السلة فارغة. يرجى إضافة منتجات أولاً.' };
         }
         if (!ctx.deliveryAddress || ctx.deliveryAddress.trim() === '') {
-          return { allowed: false, reason: 'Delivery address is required' };
+          return { allowed: false, reason: 'عنوان التوصيل مطلوب لإكمال الطلب.' };
         }
-        const effectivePayment = ctx.paymentMethodId || 'pay-cod';
-        if (!effectivePayment) {
-          return { allowed: false, reason: 'Payment method is required' };
+        if (!ctx.paymentMethodId || ctx.paymentMethodId.trim() === '') {
+          return { allowed: false, reason: 'طريقة الدفع مطلوبة لإكمال الطلب.' };
+        }
+        if (!ctx.customerName || ctx.customerName.trim() === '' || ctx.customerName === 'عميل المتجر' || ctx.customerName === 'غير محدد') {
+          return { allowed: false, reason: 'اسم العميل مطلوب لإكمال الطلب.' };
+        }
+        if (!ctx.customerPhone || ctx.customerPhone.trim() === '' || ctx.customerPhone === 'غير محدد') {
+          return { allowed: false, reason: 'رقم هاتف العميل مطلوب لإكمال الطلب.' };
         }
         return { allowed: true };
 
@@ -217,6 +223,10 @@ export class OrderCheckoutEngine {
 
     console.log(`[OrderCheckoutEngine] Production NLU Trace: conv=${session.conversationId}, intent=${nluResult.intent}, conf=${nluResult.confidence}, step=${state.step}, cartCount=${state.cart.length}`);
 
+    if ((nluResult.intent === 'PAYMENT_INFO_QUERY' || nluResult.intent === 'RECOMMENDATION_SEARCH') && state.cart.length === 0 && state.step === 'NO_ORDER') {
+      return null;
+    }
+
     // --- 1. Order Status Queries & Tracking ("أين طلبي؟", "هل طلبي جاهز؟", "حالة الطلب", "ORD-...") ---
     const explicitOrderMatch = text.match(/ORD-\d{8}-\d{4}/i);
     const isStatusKeyword = (
@@ -283,14 +293,16 @@ ${this.formatCartItemsList(state.cart)}
 
     // --- 3. Customer Identity Capture (Name & Phone Number Parsing) ---
     const phoneMatch = this.extractYemenPhone(text);
-    const hasNameLikeText = text.replace(/[\d\+\-\s]/g, '').length >= 3;
+    const hasNameLikeText = text.replace(/[\d\+\-\s]/g, '').length >= 2;
     const isExplicitIdentity = (
       lowerText.includes('الاسم') ||
+      lowerText.includes('اسمي') ||
       lowerText.includes('الهاتف') ||
       lowerText.includes('رقم جوال') ||
       lowerText.includes('جوالي هو') ||
-      (phoneMatch && (state.activeOrderDraftId || state.cart.length > 0 || state.step === 'AWAITING_CUSTOMER_INFO'))
-    ) && !lowerText.includes('محفظة');
+      state.step === 'AWAITING_CUSTOMER_INFO' ||
+      (phoneMatch && (state.activeOrderDraftId || state.cart.length > 0))
+    ) && !lowerText.includes('محفظة') && !lowerText.includes('كاش');
 
     if (isExplicitIdentity && (state.activeOrderDraftId || state.cart.length > 0 || state.step === 'AWAITING_CUSTOMER_INFO')) {
       let phone = state.customerPhone;
@@ -302,10 +314,14 @@ ${this.formatCartItemsList(state.cart)}
         const cleanedName = text
           .replace(/(?:0?7[013778]\d{7,8}|7[013778]\d{7,8})/, '')
           .replace(/الاسم[:\s]*/i, '')
+          .replace(/اسمي[:\s]*/i, '')
           .replace(/رقم الهاتف[:\s]*/i, '')
+          .replace(/و?هاتف.*/i, '')
+          .replace(/و?جوال.*/i, '')
           .replace(/الجوال[:\s]*/i, '')
           .replace(/شارع.*/i, '')
           .replace(/طريقة الدفع.*/i, '')
+          .replace(/\s+و(?:ال)?\s*$/i, '')
           .trim();
         if (cleanedName.length >= 2 && !cleanedName.includes('شارع') && !cleanedName.includes('حي') && !cleanedName.includes('صنعاء')) {
           name = cleanedName;
@@ -325,9 +341,15 @@ ${this.formatCartItemsList(state.cart)}
         state.deliveryAddress = addrExt;
       }
 
-      if (state.deliveryAddress && state.paymentMethodId && state.cart.length > 0) {
+      if (state.deliveryAddress && state.paymentMethodId && state.cart.length > 0 && state.customerName && state.customerPhone) {
         state.step = 'AWAITING_CONFIRMATION';
         return this.generateOrderSummary(state);
+      } else if (!state.customerName || state.customerName === 'عميل المتجر' || state.customerName === 'غير محدد') {
+        state.step = 'AWAITING_CUSTOMER_INFO';
+        return `يرجى تزويدنا بالاسم الكريم لإكمال الطلب.`;
+      } else if (!state.customerPhone || state.customerPhone === 'غير محدد') {
+        state.step = 'AWAITING_CUSTOMER_INFO';
+        return `يرجى تزويدنا برقم الهاتف للتواصل وإكمال الطلب.`;
       } else {
         state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
         const phoneText = phone ? `رقم الهاتف (${phone}).` : '';
@@ -382,14 +404,32 @@ ${this.formatCartItemsList(state.cart)}
       }
     }
 
-    if (isShortConfirmation && state.cart.length > 0 && (state.step === 'AWAITING_CONFIRMATION' || state.deliveryAddress)) {
-      if (state.customerPhone === undefined || state.customerPhone === null) {
-        const sessAny = session as any;
-        state.customerPhone = sessAny.customerPhone || sessAny.customerIdentity?.phone || '';
+    if (isShortConfirmation && state.cart.length > 0) {
+      if (!state.customerName || state.customerName === 'عميل المتجر' || state.customerName === 'غير محدد') {
+        state.step = 'AWAITING_CUSTOMER_INFO';
+        return `يرجى تزويدنا بالاسم الكريم لإكمال الطلب.`;
       }
 
-      // If short confirmation and address/payment are present, allow order creation
-      // (customerPhone defaults gracefully if not explicitly supplied)
+      if (!state.customerPhone || state.customerPhone === 'غير محدد') {
+        const sessAny = session as any;
+        const phoneFromSess = sessAny.customerPhone || sessAny.customerIdentity?.phone;
+        if (phoneFromSess) {
+          state.customerPhone = phoneFromSess;
+        } else {
+          state.step = 'AWAITING_CUSTOMER_INFO';
+          return `يرجى تزويدنا برقم الهاتف للتواصل وإكمال الطلب.`;
+        }
+      }
+
+      if (!state.deliveryAddress) {
+        state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
+        return `يرجى تزويدنا بعنوان التوصيل لإكمال الطلب.`;
+      }
+
+      if (!state.paymentMethodId) {
+        state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
+        return `يرجى تحديد طريقة الدفع لإكمال الطلب.`;
+      }
 
       // Re-verify Product Prices and Availability from catalog supplier
       const catalogSupplier = this.catalogProductsSupplier;
@@ -435,7 +475,8 @@ ${this.formatCartItemsList(state.cart)}
         cart: state.cart,
         deliveryAddress: state.deliveryAddress,
         paymentMethodId: state.paymentMethodId,
-        customerPhone: state.customerPhone
+        customerPhone: state.customerPhone,
+        customerName: state.customerName
       });
       console.log(`[OrderCheckoutEngine] Trace: msg="${text}", intent=CONFIRMATION, action=CREATE_ORDER, guardResult=${guardEval.allowed ? 'PASS' : 'BLOCKED'}`);
 
@@ -720,11 +761,82 @@ ${notificationMsg}`;
         const res = this.resolveSingleProductItem(segment, catalog);
         if (res.status === 'RESOLVED' && res.product) {
           this.removeItemFromCart(state, res.product.id);
-          if (state.deliveryAddress && state.paymentMethodId) {
+          if (state.deliveryAddress && state.paymentMethodId && state.customerName && state.customerPhone) {
             state.step = 'AWAITING_CONFIRMATION';
             return this.generateOrderSummary(state);
           }
           return `تم حذف (${res.product.name}) من طلبك بنجاح. مجموع المنتجات: ${state.subtotal} YER.`;
+        }
+      }
+
+      // 7.2.3 Handle Explicit REPLACE / CORRECTION (e.g. "لا، بدل بسكوت ابو ولد خليه سمن الماس" or "سمن الماس بدل بسكوت ابو ولد")
+      const isReplacePhrase = text.includes('بدل') || text.includes('استبدل') || text.includes('بدلا من') || text.includes('بدلاً من');
+      if (isReplacePhrase) {
+        let oldQuery = '';
+        let newQuery = '';
+
+        const replaceClean = text.replace(/^(?:لا[،, ]*|أريد|اريد|اضف|أضف)\s*/i, '').trim();
+
+        if (replaceClean.includes(' بدل ')) {
+          const parts = replaceClean.split(' بدل ');
+          if (parts[1].match(/^(?:خليه|خلي|ضع|اجعل|بـ|با)\s+/i) || parts[1].includes('خليه') || parts[1].includes('خلي')) {
+            oldQuery = parts[0].replace(/^(?:بدل|استبدل)\s*/i, '').trim();
+            newQuery = parts[1].replace(/^(?:خليه|خلي|ضع|اجعل|بـ|با|تكون|يكون)\s*/i, '').trim();
+          } else {
+            newQuery = parts[0].replace(/^(?:بدل|استبدل)\s*/i, '').trim();
+            oldQuery = parts[1].trim();
+          }
+        } else if (replaceClean.match(/^(?:بدل|استبدل)\s+(.+)/i)) {
+          const rest = replaceClean.replace(/^(?:بدل|استبدل)\s+/i, '').trim();
+          const splitMatch = rest.split(/\s+(?:خليه|خلي|ضع|اجعل|بـ|بدلا من|بدلاً من)\s+/i);
+          if (splitMatch.length >= 2) {
+            oldQuery = splitMatch[0].trim();
+            newQuery = splitMatch[1].trim();
+          } else {
+            const words = rest.split(/\s+/);
+            if (words.length >= 2) {
+              oldQuery = words[0];
+              newQuery = words.slice(1).join(' ');
+            }
+          }
+        }
+
+        if (oldQuery && newQuery) {
+          oldQuery = oldQuery.replace(/^(?:خليه|خلي|ضع|اجعل)\s+/i, '').trim();
+          newQuery = newQuery.replace(/^(?:خليه|خلي|ضع|اجعل|بـ|با|تكون|يكون)\s+/i, '').trim();
+
+          // 1. Remove old product from cart
+          const oldSeg: ItemSegment = { rawText: oldQuery, queryPhrase: oldQuery, normalizedQuery: this.normalizeArabic(oldQuery), quantity: 1 };
+          const oldRes = this.resolveSingleProductItem(oldSeg, catalog);
+          if (oldRes.status === 'RESOLVED' && oldRes.product) {
+            this.removeItemFromCart(state, oldRes.product.id);
+          } else {
+            const normOld = this.normalizeArabic(oldQuery);
+            const foundInCart = state.cart.find(i => this.normalizeArabic(i.productName).includes(normOld) || normOld.includes(this.normalizeArabic(i.productName)));
+            if (foundInCart) {
+              this.removeItemFromCart(state, foundInCart.productId);
+            }
+          }
+
+          // 2. Resolve new product and add to cart
+          const newSegs = this.splitUserTextIntoItemPhrases(newQuery);
+          let addedCount = 0;
+          for (const seg of newSegs) {
+            const newRes = this.resolveSingleProductItem(seg, catalog);
+            if (newRes.status === 'RESOLVED' && newRes.product && newRes.quantity) {
+              this.addItemToCart(state, newRes.product.id, newRes.product.name, newRes.product.price, newRes.quantity);
+              addedCount++;
+            }
+          }
+
+          if (addedCount > 0) {
+            if (state.deliveryAddress && state.paymentMethodId && state.customerName && state.customerPhone) {
+              state.step = 'AWAITING_CONFIRMATION';
+              return this.generateOrderSummary(state);
+            }
+            state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
+            return `تم تعديل وتحديث طلبك بنجاح:\n${this.formatCartItemsList(state.cart)}\nمجموع المنتجات: ${state.subtotal} YER.\n\nيرجى تزويدنا بعنوان التوصيل وطريقة الدفع لإكمال الطلب.`;
+          }
         }
       }
 
@@ -792,14 +904,20 @@ ${notificationMsg}`;
           notFoundNotice = `\n(ملاحظة: لم نجد منتج "${notFoundItems.join('، ')}" في المتجر ولن يتم إضافته).`;
         }
 
-        if (state.deliveryAddress && state.paymentMethodId) {
+        let ambiguousNotice = '';
+        if (ambiguousItems.length > 0) {
+          const ambParts = ambiguousItems.map(a => `بالنسبة لـ (${a.rawText})، تتوفر لدينا عدة أنواع: (${a.candidates.map(c => c.name).join('، ')}). أيها ترغب في طلبه؟`).join('\n');
+          ambiguousNotice = `\n${ambParts}`;
+        }
+
+        if (state.deliveryAddress && state.paymentMethodId && state.customerName && state.customerPhone) {
           state.step = 'AWAITING_CONFIRMATION';
-          return this.generateOrderSummary(state) + notFoundNotice;
+          return this.generateOrderSummary(state) + notFoundNotice + ambiguousNotice;
         } else {
           state.step = 'AWAITING_ADDRESS_AND_PAYMENT';
           const header = isReconcile ? 'تم تعديل ومزامنة طلبك بنجاح:' : 'تمت إضافة المنتجات إلى طلبك بنجاح:';
           return `${header}
-${this.formatCartItemsList(state.cart)}${notFoundNotice}
+${this.formatCartItemsList(state.cart)}${notFoundNotice}${ambiguousNotice}
 مجموع المنتجات: ${state.subtotal} YER.
 
 يرجى تزويدنا بعنوان التوصيل وطريقة الدفع لإكمال الطلب.`;
@@ -892,7 +1010,7 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
     const cleanQuery = normQuery.replace(/^ال/, '');
 
     const categoryKeywords = ['سمن', 'بسكوت', 'عصير', 'رز', 'زيت', 'سكر', 'شاي', 'حليب', 'ماء', 'اناناس', 'تونة', 'تونه', 'دلسي'];
-    const stopWords = ['كيلو', 'كجم', 'حبة', 'حبات', 'قطعة', 'علبة', 'علب', 'بكت', 'كرتون', 'كبير', 'صغير', 'احمر', 'أحمر', 'للعيال', 'عيال', 'حقكم', 'حقنا', 'شيء', 'شي', 'اللي', 'من', 'لل', 'حق', 'في', 'عن'];
+    const stopWords = ['كيلو', 'كجم', 'حبة', 'حبات', 'قطعة', 'علبة', 'علب', 'بكت', 'كرتون', 'للعيال', 'عيال', 'حقكم', 'حقنا', 'شيء', 'شي', 'اللي', 'من', 'لل', 'حق', 'في', 'عن', 'اريد', 'أريد', 'عايز', 'طالب', 'طلب', 'اضف', 'أضف', 'هات', 'جيب', 'احتاج', 'أحتاج', 'خليه', 'خلي'];
 
     const queryTokens = cleanQuery.split(' ').filter(t => {
       const clean = t.replace(/^ال/, '');
@@ -1072,10 +1190,11 @@ ${this.formatCartItemsList(state.cart)}${notFoundNotice}
 
     let clean = text
       .replace(/طريقة الدفع[:\s]*[\w\u0600-\u06FF]*/gi, ' ')
-      .replace(/الدفع[:\s]*[\w\u0600-\u06FF]*/gi, ' ')
+      .replace(/و?الدفع[:\s]*[\w\u0600-\u06FF]*/gi, ' ')
       .replace(/(جوالي|وان كاش|جيب|كاش|عند الاستلام)/gi, ' ')
       .replace(/العنوان[:\s]*/gi, '')
       .replace(/توصيل إلى[:\s]*/gi, '')
+      .replace(/\s+و(?:ال)?\s*$/i, '')
       .trim();
 
     if (clean.length >= 2) return clean;

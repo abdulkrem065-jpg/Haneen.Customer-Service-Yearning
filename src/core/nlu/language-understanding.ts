@@ -15,6 +15,7 @@ export type UniversalIntentType =
   | 'ORDER_STATUS_QUERY'
   | 'HUMAN_HANDOFF'
   | 'RECONCILE_CART'
+  | 'REPLACE_ITEM'
   | 'QUANTITY_CHANGE'
   | 'REMOVE_ITEM'
   | 'UNKNOWN';
@@ -54,7 +55,7 @@ export interface StructuredIntent {
   customerName?: string;
   customerPhone?: string;
   confirmation?: boolean;
-  cartOperation: 'ADD' | 'SET_QUANTITY' | 'REMOVE' | 'RECONCILE' | 'CONFIRM' | 'NONE';
+  cartOperation: 'ADD' | 'SET_QUANTITY' | 'REMOVE' | 'RECONCILE' | 'REPLACE' | 'CONFIRM' | 'NONE';
   contextReference?: boolean;
   searchQuery?: string;
   targetOrderId?: string;
@@ -275,6 +276,22 @@ export class UniversalLanguageUnderstandingProvider implements ILanguageUndersta
       };
     }
 
+    // 5.5 Payment Method Information Query
+    if (
+      rawText.includes('كيف الدفع') || norm.includes('كيف الدفع') ||
+      rawText.includes('طرق الدفع') || norm.includes('طرق الدفع') ||
+      rawText.includes('طريقة الدفع') || norm.includes('طريقه الدفع') ||
+      rawText.includes('كيف يتم الدفع') ||
+      (rawText.includes('دفع') && (rawText.includes('كيف') || rawText.includes('ماهي') || rawText.includes('ما هي')))
+    ) {
+      return {
+        intent: 'PAYMENT_INFO_QUERY',
+        confidence: 0.98,
+        productRequests: [],
+        cartOperation: 'NONE'
+      };
+    }
+
     // 6. Payment & Address Input Detection
     const paymentKeywords = ['جوالي', 'الجيب', 'محفظه', 'جيب', 'كاش', 'عند الاستلام', 'حواله', 'ام فلوس', 'بنك'];
     const hasPaymentMention = paymentKeywords.some(k => norm.includes(k));
@@ -338,6 +355,16 @@ export class UniversalLanguageUnderstandingProvider implements ILanguageUndersta
       }
     }
 
+    // 7.5 Payment Method Information Query
+    if (norm.includes('كيف الدفع') || norm.includes('طرق الدفع') || norm.includes('طريقة الدفع') || norm.includes('كيف يتم الدفع') || norm.includes('ما هي طرق الدفع') || (norm.includes('دفع') && (norm.includes('كيف') || norm.includes('ماهي') || norm.includes('ما هي')))) {
+      return {
+        intent: 'PAYMENT_INFO_QUERY',
+        confidence: 0.98,
+        productRequests: [],
+        cartOperation: 'NONE'
+      };
+    }
+
     // 8. Price Query vs Availability Query vs Purchase Intent
     const isQuestion =
       norm.includes('كم') ||
@@ -394,6 +421,15 @@ export class UniversalLanguageUnderstandingProvider implements ILanguageUndersta
         confidence: 0.98,
         productRequests,
         cartOperation: 'RECONCILE'
+      };
+    }
+
+    if (rawText.includes('بدل') || rawText.includes('استبدل') || rawText.includes('بدلا من') || rawText.includes('بدلاً من')) {
+      return {
+        intent: 'REPLACE_ITEM',
+        confidence: 0.98,
+        productRequests,
+        cartOperation: 'REPLACE'
       };
     }
 

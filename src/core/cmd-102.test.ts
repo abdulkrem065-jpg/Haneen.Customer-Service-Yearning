@@ -125,6 +125,7 @@ describe('CMD-102 — Sana Core Refactor & Universal Understanding', () => {
     await checkoutEngine.handleCheckoutMessage('أبي سمن الماس', mockSession, mockContext);
     await checkoutEngine.handleCheckoutMessage('شارع الزبيري جوار برج الأمل', mockSession, mockContext);
     await checkoutEngine.handleCheckoutMessage('كاش عند الاستلام', mockSession, mockContext);
+    await checkoutEngine.handleCheckoutMessage('الاسم علي الذيباني وهاتفي 774780112', mockSession, mockContext);
     const confirmRes = await checkoutEngine.handleCheckoutMessage('نعم أؤكد الطلب', mockSession, mockContext);
 
     expect(confirmRes).toContain('تم استلام طلبك بنجاح');
